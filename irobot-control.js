@@ -152,11 +152,11 @@ Robot.prototype._init = function () {
   // enter safe mode by default
   this.safeMode();
 
+  // start streaming all sensor data, generating data every 15ms
+  this.command(Robot.COMMANDS.STREAM, 1, Robot.SENSORS.ALL.id);
+
   // handle receipt of data
   this.serial.on('data', this._handleData.bind(this));
-
-  // start streaming all sensor data, generating data every 15ms
-  this.command(Robot.COMMANDS.STREAM, Robot.SENSORS.ALL);
 
   // emit an event to alert that we're now ready to receive commands!
   this.emit('ready');
@@ -193,16 +193,15 @@ Robot.prototype._handleData = function (data) {
 
 // send a command packet to the robot over the serial port, with additional
 // arguments as packet data bytes.
-Robot.prototype.command = function () {
-  if (arguments.length === 0) {
-    throw new Error('command opcode is required');
-  }
-
+Robot.prototype.command = function (command) {
   // turn the arguments into a packet of command opcode followed by data bytes
-  var packet = new Buffer(Array.prototype.slice.call(arguments));
+  var packet = [command.opcode];
+  packet = packet.concat(Array.prototype.slice.call(arguments, 1));
 
-  // write the packet and flush the write to force sending the data immediately
-  this.serial.write(packet);
+  var bytes = new Buffer(packet);
+
+  // write the bytes and flush the write to force sending the data immediately
+  this.serial.write(bytes);
   this.serial.flush();
 
   return this;
