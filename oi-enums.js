@@ -431,7 +431,7 @@ var SENSORS = {
 
   REQUESTED_RADIUS: {
     id: 40,
-    bytes: 2
+    bytes: 2,
     parse: parseSigned
   },
 
