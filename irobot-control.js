@@ -300,3 +300,5 @@ Robot.prototype.stop = function () {
 
   return this;
 };
+
+module.exports.Robot = Robot;
