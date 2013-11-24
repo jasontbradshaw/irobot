@@ -1,4 +1,4 @@
-var Robot = require('./irobot-control').Robot;
+var Robot = require('./irobot').Robot;
 
 var robot = new Robot({ device: '/dev/ttyUSB0' });
 
