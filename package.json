@@ -1,0 +1,37 @@
+{
+  "name": "irobot-control",
+  "description": "An implementation of the iRobot Open Interface version 2 API.",
+  "private": true,
+  "version": "0.0.0",
+  "homepage": "http://github.com/jasontbradshaw/irobot-control",
+  "author": {
+    "name": "Jason T. Bradshaw",
+    "url": "http://jasontbradshaw.com"
+  },
+  "main": "./index",
+  "licenses": [
+    {
+      "type": "MIT",
+      "url": "http://github.com/jasontbradshaw/irobot-control/blob/master/LICENSE"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/jasontbradshaw/irobot-control.git"
+  },
+  "engines": {
+    "node": ">=0.10.0"
+  },
+  "keywords": [
+    "create",
+    "interface",
+    "irobot",
+    "open",
+    "roomba"
+  ],
+  "dependencies": {
+    "lodash": "~2.3.0",
+    "node.extend": "~1.0.8",
+    "serialport": "~1.2.5"
+  }
+}
