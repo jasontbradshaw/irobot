@@ -1,18 +1,18 @@
 var _ = require('lodash');
 
-// combine an array of unsigned bytes in high-to-low order into a single integer
-var fromUnsignedBytes = function (bytes) {
+// turn a buffer into an int intelligently depending on its length
+var bufferToInt = function (buffer, signed) {
   var result = 0;
-  for (var i = 0, length = bytes.length, b; i < length, b = bytes[i]; i++) {
-    // make room for the new byte
-    result = result << 8;
 
-    // XOR the byte in with the result, making sure we're only dealing with the
-    // lowest 8 bits of the byte so we don't overwrite our previous work.
-    result = result ^ (b & 0x000000FF);
-  }
+  // makes something like 'readUInt8' or 'readInt32'
+  var method = [
+    'read',
+    signed ? '' : 'U', 'Int',
+    buffer.length * 8,
+    buffer.length > 1 ? 'BE' : ''
+  ].join('');
 
-  return result;
+  return buffer[method](0);
 };
 
 // return a value as a percentage scaled to the given ranges
@@ -32,26 +32,29 @@ var scaleValue = function (rawValue, options) {
 var parseBool = function (bytes) { return !!(bytes[0]); }
 
 // parse the given bytes into an unsigned integer
-var parseUnsigned = function (bytes) { return fromUnsignedBytes(bytes); }
+var parseUnsigned = function (bytes) { return bufferToInt(bytes); }
+
+// parse the given bytes into a signed integer
+var parseSigned = function (bytes) { return bufferToInt(bytes, true); }
 
 // return the bits of a byte as a boolean array
 var parseBits = function (b) {
   return [
-    !!((b & 0x80) >> 7);
-    !!((b & 0x40) >> 6);
-    !!((b & 0x20) >> 5);
-    !!((b & 0x10) >> 4);
-    !!((b & 0x8) >> 3);
-    !!((b & 0x4) >> 2);
-    !!((b & 0x2) >> 1);
-    !!(b & 0x1);
+    !!((b & 0x80) >> 7),
+    !!((b & 0x40) >> 6),
+    !!((b & 0x20) >> 5),
+    !!((b & 0x10) >> 4),
+    !!((b & 0x8) >> 3),
+    !!((b & 0x4) >> 2),
+    !!((b & 0x2) >> 1),
+    !!(b & 0x1)
   ];
 };
 
-var buildParseUnsigned = function (valueKey) {
+var buildParseInt = function (valueKey, signed) {
   return function (bytes) {
     var result = {};
-    result[valueKey] = fromUnsignedBytes(bytes);
+    result[valueKey] = bufferToInt(bytes, signed);
     return result;
   };
 };
@@ -62,7 +65,7 @@ var buildParseScaled = function (actualValueKey, options) {
 
     result['min_' + actualValueKey] = options.min_actual || 0;
     result['max_' + actualValueKey] = options.max_actual;
-    result[actualValueKey] = scaleValue(fromUnsignedBytes(bytes), options);
+    result[actualValueKey] = scaleValue(bufferToInt(bytes), options);
 
     return result;
   };
@@ -75,7 +78,7 @@ var buildParseMagnitude = function (options) {
       min: options.min,
       max: options.max,
       range: options.max - options.min,
-      raw: fromUnsignedBytes(bytes)
+      raw: bufferToInt(bytes)
     };
 
     result.magnitude = 1.0 * result.raw / result.range;
@@ -114,7 +117,7 @@ var COMMANDS = {
 };
 
 // the various sensors the robot has access to. each has a parse function that,
-// when given an array of the data bytes the packet defines, returns an object
+// when given a Buffer of the data bytes the packet defines, returns an object
 // containing the relevant data in a nice format.
 var SENSORS = {
   ALL: {
@@ -243,17 +246,13 @@ var SENSORS = {
   DISTANCE: {
     id: 19,
     bytes: 2,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: parseSigned
   },
 
   ANGLE: {
     id: 20,
     bytes: 2,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: parseSigned
   },
 
   CHARGING_STATE: {
@@ -275,35 +274,31 @@ var SENSORS = {
   VOLTAGE: {
     id: 22,
     bytes: 2,
-    parse: buildParseUnsigned('millivolts')
+    parse: buildParseInt('millivolts')
   },
 
   CURRENT: {
     id: 23,
     bytes: 2,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: buildParseInt('milliamp_hours', true)
   },
 
   BATTERY_TEMPERATURE: {
     id: 24,
     bytes: 1,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: buildParseInt('celcius', true)
   },
 
   BATTERY_CHARGE: {
     id: 25,
     bytes: 2,
-    parse: buildParseUnsigned('milliamp_hours')
+    parse: buildParseInt('milliamp_hours')
   },
 
   BATTERY_CAPACITY: {
     id: 26,
     bytes: 2,
-    parse: buildParseUnsigned('milliamp_hours')
+    parse: buildParseInt('milliamp_hours')
   },
 
   WALL_SIGNAL: {
@@ -431,33 +426,25 @@ var SENSORS = {
   REQUESTED_VELOCITY: {
     id: 39,
     bytes: 2,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: parseSigned
   },
 
   REQUESTED_RADIUS: {
     id: 40,
     bytes: 2
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: parseSigned
   },
 
   REQUESTED_RIGHT_VELOCITY: {
     id: 41,
     bytes: 2,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    parse: parseSigned
   },
 
   REQUESTED_LEFT_VELOCITY: {
     id: 42,
-    bytes: ,
-    parse: function (bytes) {
-      // TODO: handle signed values
-    }
+    bytes: 2,
+    parse: parseSigned
   }
 };
 

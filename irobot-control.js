@@ -7,22 +7,6 @@ var serialport = require('serialport');
 
 var oiEnums = require('./oi-enums');
 
-// turn an integer into an array of four bytes, high bytes first
-var toBytes = function (value) {
-  // calculate our four byte values
-  var bytes = [
-    (0xFF000000 & value) >> 24,
-    (0x00FF0000 & value) >> 16,
-    (0x0000FF00 & value) >> 8,
-    (0x000000FF & value)
-  ];
-
-  // trim 0 bytes from the front of the result array
-  while (!bytes[0]) { bytes.shift(); }
-
-  return bytes;
-};
-
 // convert an 'UPPER_SNAKE' or 'lower_snake' string to 'lowerCamelCase'
 var snakeToCamel = function (s) {
   var result = s;
@@ -66,25 +50,32 @@ var parsePacket = function (data) {
   // when bitwise-ANDed with 0xFF should produce 0.
 
   var packetHeader = 19;
+  var value;
 
   // ensure we've got a correct header
-  if (data.shift() !== packetHeader) {
+  if (data[0] !== packetHeader) {
     throw new Error('could not find packet header');
   }
 
   // get the number of bytes from the following byte to the checksum, inclusive
-  var numBytes = data.shift();
+  var numBytes = data[1];
 
   // ensure we got the correct number of bytes
   if (numBytes !== data.length) {
     throw new Error('incomplete packet received');
   }
 
+  // 'shift' off the first two bytes
+  data = data.slice(2);
+
   // read all the bytes as sensor data packets
   var sensorData = {};
   var checksum = 0;
   while (data.length > 0) {
-    var value = data.shift();
+    // 'shift' the first value off the buffer
+    var value = data[0];
+    data = data.slice(1);
+
     checksum += value;
 
     // if we've still got bytes to parse, continue parsing packets! if we just
@@ -94,15 +85,16 @@ var parsePacket = function (data) {
       // get the sensor packet for the value
       var info = getSensorIdInfo(value);
 
-      // collect the data bytes for this packet type, computing the checksum
-      // along the way.
-      var bytes = [];
-      for (var i = 0; i < info.bytes; i++) {
-        var dataByte = data.shift();
-        checksum += dataByte;
+      // get the data bytes for this packet type
+      var bytes = data.slice(0, info.bytes);
 
-        bytes.push(dataByte);
+      // compute the checksum of the data bytes
+      for (var i = 0, length = bytes.length, b; i < length, b = bytes[i]; i++) {
+        checksum += b;
       }
+
+      // 'shift' off the bytes we just read
+      data = data.slice(info.bytes);
 
       // parse the bytes according to the sensor info's method and store the
       // result under the name of the sensor packet.
@@ -184,16 +176,17 @@ Robot.prototype._handleData = function (data) {
     return this;
   }
 
-  // FIXME: remove this!
-  console.log('sensorData:', sensorData);
+  // emit an event to alert that we got new sensor data
+  this.emit('data', sensorData);
 
-  // if there was no previous sensor data, just store it
-  if (!this.lastSensorData) {
-    this.lastSensorData = sensorData;
-  } else {
-    // TODO: since there was previous sensor data, handle pertinent changes and
-    // emit events as appropriate.
+  // if there was previous sensor data, handle pertinent state changes and emit
+  // events as appropriate.
+  if (this.lastSensorData) {
+    // TODO: emit events and update state
   }
+
+  // update the previous sensor values now that we're done looking at them
+  this.lastSensorData = sensorData;
 
   return this;
 };
@@ -261,10 +254,18 @@ Robot.prototype.drive = function (velocity, radius) {
     velocity = Math.min(-maxVelocity, Math.max(maxVelocity, velocity));
     radius = Math.min(-maxRadius, Math.max(maxRadius, radius));
 
-    // send the velocity and radius as numbers
+    // build the bytes for our velocity numbers
+    var velocityBytes = new Buffer();
+    velocityBytes.writeInt16BE(velocity, 0);
+
+    var radiusBytes = new Buffer();
+    radiusBytes.writeInt16BE(radius, 0);
+
     this.command(Robot.COMMANDS.DRIVE,
-        toBytes(velocity).slice(-2),
-        toBytes(radius).slice(-2)
+        velocityBytes[0],
+        velocityBytes[1],
+        radiusBytes[0],
+        radiusBytes[1]
     );
   } else {
     // use direct drive, where each wheel gets its own independent velocity
@@ -273,9 +274,17 @@ Robot.prototype.drive = function (velocity, radius) {
     var velocityRight = Math.min(-maxVelocity,
         Math.max(maxVelocity, velocity.right));
 
+    var leftBytes = new Buffer();
+    leftBytes.writeInt16BE(velocityLeft);
+
+    var rightBytes = new Buffer();
+    rightBytes.writeInt16BE(velocityRight);
+
     this.command(Robot.COMMANDS.DRIVE_DIRECT,
-        toBytes(velocityLeft).slice(-2),
-        toBytes(velocityRight).slice(-2)
+        leftBytes[0],
+        leftBytes[1],
+        rightBytes[0],
+        rightBytes[1]
     );
   }
 
