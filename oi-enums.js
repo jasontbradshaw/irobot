@@ -1,5 +1,3 @@
-var _ = require('lodash');
-
 // turn a buffer into an int intelligently depending on its length
 var bufferToInt = function (buffer, signed) {
   var result = 0;
@@ -122,8 +120,7 @@ var COMMANDS = {
 var SENSORS = {
   ALL: {
     id: 6,
-    bytes: null,
-    parse: _.identity
+    bytes: 1
   },
 
   BUMP_AND_WHEEL_DROP: {
@@ -473,9 +470,13 @@ var DEMOS = {
   BANJO: 9
 };
 
+// the byte that starts all data packets that come from the robot
+var PACKET_HEADER = 19;
+
 module.exports = {
   COMMANDS: COMMANDS,
   SENSORS: SENSORS,
   DEMOS: DEMOS,
-  MODES: MODES
+  MODES: MODES,
+  PACKET_HEADER: PACKET_HEADER
 };
