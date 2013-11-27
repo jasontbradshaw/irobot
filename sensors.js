@@ -147,10 +147,15 @@ module.exports.isValidSensorPacket = function (packet) {
   return !(checksum & 0xFF);
 };
 
+var prettifySensorData = function (rawSensorData) {
+  // TODO: parse the initial sensor data object into a more useful version
+  return rawSensorData;
+};
+
 // parse a complete data packet byte array and return the parsed results
 module.exports.parseSensorData = function (data) {
   // read all the bytes as sensor data packets
-  var sensorData = {};
+  var rawSensorData = {};
 
   // we use a 'for' loop to ensure that it must eventually terminate
   var i, length, packetId;
@@ -171,14 +176,15 @@ module.exports.parseSensorData = function (data) {
     var parsedData = packetInfo.parse(new Buffer(bytes));
 
     if (!_.isUndefined(parsedData)) {
-      sensorData[packetInfo.name] = parsedData;
+      rawSensorData[packetInfo.name] = parsedData;
     }
 
     // skip over the bytes we just consumed
     i += packetInfo.bytes;
   }
 
-  return sensorData;
+  // return the preffified result
+  return prettifySensorData(rawSensorData);
 };
 
 // create and export all the various sensor packet types
