@@ -173,6 +173,7 @@ var prettifySensorData = function (raw) {
     detecting: raw.virtual_wall
   };
 
+  // TODO: verify that this works
   data.ir = {
     receiving: raw.infrared_byte.receiving,
     received_value: raw.infrared_byte.receiving ? raw.infrared_byte.value : null
@@ -184,15 +185,27 @@ var prettifySensorData = function (raw) {
   };
 
   data.battery = {
-    // whether the battery is recharging right now, and the source it's from
-    charging: !raw.charging_state.not_charging,
-    charge: {
-      type: _.omit(raw.charging_sources_available, 'not_charging'),
-      from: raw.charging_sources_available
+    charging: {
+      recharging: !raw.charging_state.not_charging,
+      from: raw.charging_sources_available,
+      type: {
+        reconditioning: raw.charging_state.reconditioning_charging,
+        full: raw.charging_state.full_charging,
+        trickle: raw.charging_state.trickle_charging,
+        waiting: raw.charging_state.waiting,
+        fault: raw.charging_state.charging_fault_condition
+      }
     },
 
-    voltage: raw.voltage,
-    current: raw.current,
+    voltage: {
+      volts: raw.voltage.millivolts / 1000,
+      millivolts: raw.voltage.millivolts
+    },
+
+    current: {
+      amps: raw.current.milliamps / 1000,
+      milliamps: raw.current.milliamps
+    },
 
     temperature: {
       celsius: raw.battery_temperature.celsius,
@@ -200,6 +213,8 @@ var prettifySensorData = function (raw) {
     },
 
     capacity: {
+      percent: (raw.battery_charge.milliamp_hours /
+                raw.battery_capacity.milliamp_hours),
       current: raw.battery_charge,
       max: raw.battery_capacity,
     }
@@ -357,7 +372,7 @@ _.extend(module.exports, {
   }),
 
   Voltage: new Packet('voltage', 22, 2, buildParseInt('millivolts')),
-  Current: new Packet('current', 23, 2, buildParseInt('milliamp_hours')),
+  Current: new Packet('current', 23, 2, buildParseInt('milliamps', true)),
 
   BatteryTemperature: new Packet('battery_temperature', 24, 1, buildParseInt('celsius', true)),
   BatteryCharge: new Packet('battery_charge', 25, 2, buildParseInt('milliamp_hours')),
