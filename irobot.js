@@ -10,18 +10,28 @@ var demos = require('./demos');
 var sensors = require('./sensors');
 var songs = require('./songs');
 
-var Robot = function (options) {
+var Robot = function (device, options) {
   events.EventEmitter.call(this);
 
-  // set up our options
+  if (!_.isString(device)) {
+    var err = new Error('a valid serial device string is required!');
+    err.invalid_device = device;
+    throw err;
+  }
+
+  // set up our options. we pull in the device we were given for convenience
   var defaults = {
-    device: null,
+    device: device,
     baudrate: 57600
   };
   this.options = extend(defaults, options);
 
-  // set up the serial connection to the given device
-  this.serial = new serialport.SerialPort(options.device, {
+  // the parsed contents of the most recent streamed data response, kept around
+  // so we can compare subsequent responses for differences.
+  this._sensorData = null;
+
+  // initiate a serial connection to the robot
+  this.serial = new serialport.SerialPort(this.options.device, {
     baudrate: this.options.baudrate,
     databits: 8,
     stopbits: 1,
@@ -34,15 +44,39 @@ var Robot = function (options) {
   // run our setup function once the serial connection is ready
   this.serial.on('open', this._init.bind(this));
 
-  // the parsed contents of the most recent streamed data response, kept around
-  // so we can compare them for differences.
-  this.lastSensorData = null;
+  // handle incoming sensor data whenever we get it
+  this.on('sensordata', this._handleSensorData.bind(this));
 
   // where incoming serial data is held until a complete packet is received
   this._buffer = [];
 };
 
 util.inherits(Robot, events.EventEmitter);
+
+// run once the serial port reports a connection
+Robot.prototype._init = function () {
+  // send the required initial start command to the robot
+  this._sendCommand(commands.Start);
+
+  // enter safe mode by default
+  this.safeMode();
+
+  // start streaming all sensor data. we manually specify the packet ids we need
+  // since streaming with the special bytes (id < 7) returns responses that
+  // require special cases to correctly parse.
+  var packets = _.pluck(sensors.ALL_SENSOR_PACKETS, 'id');
+  this._sendCommand(commands.Stream, packets.length, packets);
+
+  // give feedback that we've connected
+  this.sing(songs.START);
+
+  // emit an event to alert that we're now ready to receive commands once we've
+  // received the first sensor data. that means that the robot is communicating
+  // with us and ready to go!
+  this.once('sensordata', _.bind(this.emit, this, 'ready'));
+
+  return this;
+};
 
 // collect serial data in an internal buffer until we receive an entire packet,
 // and then emit a 'packet' event so that packet can be specifically parsed.
@@ -86,49 +120,22 @@ Robot.prototype._parseSerialData = function (emitter, data) {
   return this;
 };
 
-// run once the serial port connects successfully
-Robot.prototype._init = function () {
-  // handle incoming sensor data
-  this.on('sensordata', this._handleSensorData.bind(this));
-
-  // send the required initial start command to the robot
-  this._sendCommand(commands.Start);
-
-  // enter safe mode by default
-  this.safeMode();
-
-  // start streaming all sensor data. we manually collect the packet ids we need
-  // since streaming with the special bytes (id < 7) returns funky responses
-  // that require lots of special cases to parse.
-  var packets = _.pluck(sensors.ALL_SENSOR_PACKETS, 'id');
-  this._sendCommand(commands.Stream, packets.length, packets);
-
-  this.sing(songs.START);
-
-  // emit an event to alert that we're now ready to receive commands! we wait
-  // for a bit to allow the song to finish playing and so that we'll have
-  // hopefully received some sensor data by then.
-  setTimeout(_.bind(this.emit, this, 'ready'), 250);
-
-  return this;
-};
-
-// handle when a parsed data packet is received from the robot
+// handle incoming sensor data and emit events to notify of changes
 Robot.prototype._handleSensorData = function (sensorData) {
   // if there was previous sensor data, handle pertinent state changes and emit
   // events as appropriate.
-  if (this.lastSensorData) {
+  if (this._sensorData) {
     // TODO: emit events and update state
   }
 
-  // update the previous sensor values now that we're done looking at them
-  this.lastSensorData = sensorData;
+  // update the stored sensor values now that we're done looking at them
+  this._sensorData = sensorData;
 
   return this;
 };
 
 // send a command packet to the robot over the serial port, with additional
-// arguments flattened into packet data bytes.
+// arguments recursively flattened into individual bytes.
 Robot.prototype._sendCommand = function (command) {
   // turn the arguments into a packet of command opcode followed by data bytes.
   // arrays in arguments after the first are flattened.
@@ -142,30 +149,33 @@ Robot.prototype._sendCommand = function (command) {
   return this;
 };
 
+// return a copy of the most recently received sensor data, or null if none has
+// been received yet.
+Robot.getSensorData = function () {
+  return this._sensorData ? extend({}, this._sensorData) : null;
+};
+
 // make the robot play a song. notes is an array of arrays, where each item is a
-// pair of note number to duration in milliseconds. null note values are treated
-// as pauses, as are out-of-range values. notes are treated as frequencies in
-// Hertz unless treatAsMIDI is set to true.
-Robot.prototype.sing = function (notes, treatAsMIDI) {
+// pair of note frequency in Hertz and its duration in milliseconds. non-numeric
+// note values (like null) are treated as pauses, as are out-of-range values.
+Robot.prototype.sing = function (notes) {
   // use only the first 16 notes since the robot can't store more
   // TODO: store longer sequences in multiple song slots and play sequentially
   notes = (notes || []).slice(0, 16);
 
   if (notes.length > 0) {
     // transform given note values to a [MIDI note, 64ths/second] format
-    notes = _.map(notes, function (note) {
+    var convertedNotes = _.map(notes, function (note) {
       var noteValue = note[0];
       var durationMS = note[1];
 
-      // convert notes to the MIDI note number format
-      var midiNote;
-      if (noteValue === null) {
-        // convert null notes to out-of-range notes, i.e. pauses
-        midiNote = 0;
-      } else if (!treatAsMIDI) {
+      // non-numeric and out-of-range notes are treated as pauses by the robot
+      var midiNote = 0;
+      if (_.isNumber(noteValue)) {
         // convert the Hertz value to a MIDI note number
         // see: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
-        midiNote = Math.round(69 + 12 * (Math.log(noteValue / 440) / Math.log(2)));
+        midiNote = Math.round(69 + 12 *
+            (Math.log(noteValue / 440) / Math.log(2))); // log base change
       }
 
       // convert the note lengths from milliseconds to 64ths of a second
@@ -174,52 +184,45 @@ Robot.prototype.sing = function (notes, treatAsMIDI) {
       return [midiNote, durations64ths];
     });
 
-    // store the song in the first slot
-    this._sendCommand(commands.Song, 0, notes.length, notes);
-
-    // play the stored song immediately
+    // store the song in the first slot, then play it
+    this._sendCommand(commands.Song, 0, convertedNotes.length, convertedNotes);
     this._sendCommand(commands.PlaySong, 0);
   }
 
   return this;
 };
 
-// shortcuts for putting the robot into its various modes
+// put the robot into passive mode
 Robot.prototype.passiveMode = function () {
   this._sendCommand(commands.Start);
   return this;
 };
 
+// put the robot into safe mode
 Robot.prototype.safeMode = function () {
   this._sendCommand(commands.Safe);
   return this;
 };
 
+// put the robot into full mode
 Robot.prototype.fullMode = function () {
   this._sendCommand(commands.Full);
   return this;
 };
 
-// run one of the built-in demos specified by the demo id
+// run one of the built-in demos specified by the demo id. to stop the demo,
+// use #halt().
 Robot.prototype.demo = function (demoId) {
   this._sendCommand(commands.Demo, demoId);
   return this;
 };
 
-// stop any currently active demo
-Robot.prototype.abortDemo = function () {
-  this._sendCommand(commands.Demo, demos.Abort);
-  return this;
-};
-
-// tell the robot to seek out and mate with its dock
+// tell the robot to seek out and mate with its dock. to cancel the docking
+// maneuver, use #halt().
 Robot.prototype.dock = function () {
   this.demo(demos.CoverAndDock);
   return this;
 };
-
-// since docking is a demo, just alias the demo abort method
-Robot.prototype.abortDock = Robot.prototype.abortDemo;
 
 // drive the robot in one of two ways:
 //  - velocity, radius
@@ -263,8 +266,9 @@ Robot.prototype.drive = function (velocity, radius) {
   return this;
 };
 
-// stop the robot from moving/rotating
+// stop the robot from moving/rotating, and stop any current demo
 Robot.prototype.halt = function () {
+  this.demo(demos.Abort);
   this.drive(0, 0);
   return this;
 };
