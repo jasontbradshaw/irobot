@@ -65,8 +65,17 @@ Robot.prototype._parseSerialData = function (emitter, data) {
         // strip off the header, length, and checksum since we don't need them
         packet = packet.slice(2, -1);
 
-        // parse the sensor data and emit an event with it
-        this.emit('sensordata', sensors.parseSensorData(packet));
+        // parse the sensor data and emit an event with it. if we fail, just
+        // alert that we got a bad packet and continue. since there are lots of
+        // packets coming through, some are bound to end up corrupted.
+        try {
+          this.emit('sensordata', sensors.parseSensorData(packet));
+        } catch (e) {
+          var err = new Error('bad sensor data packet received');
+          err.parse_error = e;
+          err.packet = packet;
+          this.emit('badpacket', err);
+        }
 
         break;
       }
