@@ -156,7 +156,7 @@ var prettifySensorData = function (raw) {
     },
     front_right: {
       detecting: raw.cliff_front_right,
-      signal: raw.cliff_fron_right_signal
+      signal: raw.cliff_front_right_signal
     },
     right: {
       detecting: raw.cliff_right,
