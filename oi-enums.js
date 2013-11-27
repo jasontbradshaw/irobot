@@ -1,7 +1,7 @@
+var extend = require('node.extend');
+
 // turn a buffer into an int intelligently depending on its length
 var bufferToInt = function (buffer, signed) {
-  var result = 0;
-
   // makes something like 'readUInt8' or 'readInt32'
   var method = [
     'read',
@@ -37,6 +37,7 @@ var parseSigned = function (bytes) { return bufferToInt(bytes, true); }
 
 // return the bits of a byte as a boolean array
 var parseBits = function (b) {
+  // jshint bitwise:false
   return [
     !!((b & 0x80) >> 7),
     !!((b & 0x40) >> 6),
@@ -118,11 +119,6 @@ var COMMANDS = {
 // when given a Buffer of the data bytes the packet defines, returns an object
 // containing the relevant data in a nice format.
 var SENSORS = {
-  ALL: {
-    id: 6,
-    bytes: 1
-  },
-
   BUMP_AND_WHEEL_DROP: {
     id: 7,
     bytes: 1,
@@ -408,9 +404,7 @@ var SENSORS = {
     id: 37,
     bytes: 1,
     parse: function (bytes) {
-      return {
-        playing: !!(bytes[0])
-      };
+      return !!(bytes[0]);
     }
   },
 

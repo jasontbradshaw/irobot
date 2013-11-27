@@ -30,43 +30,42 @@ var getSensorIdInfo = _.memoize(function (id) {
   return result;
 });
 
-// parse a complete data packet array and return the parsed results
-var parsePacket = function (data) {
+// calculate the checksum of some packet data and return true if its valid
+var isValidPacket = function (packet) {
   // format looks like:
   //   [header][bytes-count][id-1][data-1...][id-2][data-2...][checksum]
   //
-  // checksum is sum of all bytes from bytes-count to checksum inclusive, which
-  // when bitwise-ANDed with 0xFF should produce 0.
+  // checksum is the sum of all bytes in a packet, header to checksum inclusive,
+  // that when bitwise-ANDed with 0xFF should produce 0. this is in contrast
+  // with what the docs claim, but this implementation is actually the correct
+  // one.
 
-  // ensure we've got a correct header (the first byte)
-  var packetHeader = data.shift();
+  // if the packet header doesn't match, it's invalid
+  var packetHeader = packet[0];
   if (packetHeader !== oiEnums.PACKET_HEADER) {
-    throw new Error('invalid packet header (' + packetHeader + ')');
+    return false;
   }
 
-  // ensure we got the correct number of bytes. the "+ 2" accounts for the
-  // length byte itself and the checksum.
-  var packetLength = data[0];
-  if (packetLength + 2 !== data.length) {
-    throw new Error('incomplete packet received (got ' + data.length +
-        ' bytes, expected ' + packetLength + ')');
+  // if the length doesn't match, it's invalid. the "+ 3" accounts for the
+  // length byte, header, and checksum.
+  var packetLength = packet[1];
+  if (packetLength + 3 !== packet.length) {
+    return false;
   }
 
-  // compute the packet checksum and fail if it's non-zero
+  // sum all the bytes in the packet
   var checksum = 0;
-  for (var i = data.length - 1; i >= 0; i--) {
-    checksum += data[i];
+  for (var i = packet.length - 1; i >= 0; i--) {
+    checksum += packet[i];
   }
 
+  // if the checksum is non-zero, it's invalid. otherwise it passed validation!
   // jshint bitwise:false
-  if (checksum & 0x01) {
-    throw new Error('packet checksum (' + checksum + ') failed');
-  }
+  return !(checksum & 0xFF);
+};
 
-  // remove the length (first) and checksum (last) since we no longer need them
-  data.shift();
-  data.pop();
-
+// parse a complete data packet array and return the parsed results
+var parseSensorData = function (data) {
   // read all the bytes as sensor data packets
   var sensorData = {};
   while (data.length > 0) {
@@ -113,8 +112,8 @@ var Robot = function (options) {
     stopbits: 1,
     parity: 'none',
 
-    // parse packets our own way, since we need to look for delimiters
-    parser: this._serialParser.bind(this)
+    // use our custom packet parser
+    parser: this._parseSerialData.bind(this)
   });
 
   // run our setup function once the serial connection is ready
@@ -138,44 +137,31 @@ Robot.DEMOS = oiEnums.DEMOS;
 
 // collect serial data in an internal buffer until we receive an entire packet,
 // and then emit a 'packet' event so that packet can be specifically parsed.
-Robot.prototype._serialParser = function (emitter, data) {
-  var i, length, b;
+Robot.prototype._parseSerialData = function (emitter, data) {
+  // add the received bytes to our internal buffer in-place
+  Array.prototype.push.apply(this._buffer, data);
 
-  // add the received bytes to our internal buffer
-  for (i = 0, length = data.length, b; i < length, (b = data[i]); i++) {
-    this._buffer.push(b);
-  }
+  // attempt to find a valid packet in our stored bytes
+  for (var i = this._buffer.length; i >= 0; i--) {
+    if (this._buffer[i] === oiEnums.PACKET_HEADER) {
+      // the packet length byte value and the packet end index (exclusive)
+      var packetLength = this._buffer[i + 1];
+      var endIndex = i + packetLength + 3;
 
-  // attempt to find a packet header in our stored bytes
-  var packetHeaderIndex = -1;
-  var packetLengthIndex = -1;
-  for (i = 0, length = this._buffer.length, b; i < length, (b = data[i]); i++) {
-    if (b === oiEnums.PACKET_HEADER) {
-      // store the indexes we'll need to continue parsing
-      packetHeaderIndex = i;
-      packetLengthIndex = i + 1;
-      break;
-    }
-  }
+      // set our indexes if we got a valid packet
+      var packet = this._buffer.slice(i, endIndex);
+      if (isValidPacket(packet)) {
+        // discard all bytes up to the packet's last byte inclusive
+        this._buffer.splice(0, endIndex);
 
-  // if we found a packet header and there's room for both a length byte and
-  // checksum following it, grab the rest of the packet data.
-  if (packetHeaderIndex >= 0 && packetHeaderIndex < this._buffer.length - 2) {
-    var packetLength = this._buffer[packetLengthIndex];
+        // strip off the header, length, and checksum since we don't need them
+        packet = packet.slice(2, -1);
 
-    // if we've got enough bytes for an entire packet, parse it out.
-    // NOTE: length accounts only for the bytes after the length byte but before
-    // the checksum.
-    if (packetLengthIndex + packetLength < this._buffer.length) {
-      // remove any bytes preceding the packet header
-      this._buffer.splice(0, packetHeaderIndex);
+        // parse the sensor data and emit an event with it
+        this.emit('sensordata', parseSensorData(packet));
 
-      // splice out the packet bytes, header and checksum included
-      var packetBytes = this._buffer.splice(0, packetLength + 3);
-      console.log('packetBytes:', '[' + packetBytes.join(', ') + ']');
-
-      // emit a packet event with the data we just parsed
-      emitter.emit('packet', packetBytes);
+        break;
+      }
     }
   }
 
@@ -184,8 +170,8 @@ Robot.prototype._serialParser = function (emitter, data) {
 
 // run once the serial port connects successfully
 Robot.prototype._init = function () {
-  // handle incoming data
-  this.serial.on('packet', this._handlePacket.bind(this));
+  // handle incoming sensor data
+  this.on('sensordata', this._handleSensorData.bind(this));
 
   // send the required initial start command to the robot
   this.command(Robot.COMMANDS.START);
@@ -193,8 +179,13 @@ Robot.prototype._init = function () {
   // enter safe mode by default
   this.safeMode();
 
-  // start streaming all sensor data
-  this.command(Robot.COMMANDS.STREAM, 1, oiEnums.SENSORS.ALL.id);
+  // start streaming all sensor data. we manually collect the packet ids we need
+  // since streaming with the special bytes (id < 7) causes funky responses that
+  // are difficult to parse and overall confusing. it's easier just to build an
+  // explicit list of what we _do_ want.
+  var packets = _.pluck(oiEnums.SENSORS, 'id');
+  var args = [Robot.COMMANDS.STREAM, packets.length].concat(packets);
+  this.command.apply(this, args);
 
   // emit an event to alert that we're now ready to receive commands!
   this.emit('ready');
@@ -202,21 +193,8 @@ Robot.prototype._init = function () {
   return this;
 };
 
-// handle when a complete data packet is received from the robot
-Robot.prototype._handlePacket = function (data) {
-  var sensorData;
-
-  // try to parse the sensor data, emitting an event and giving up if it fails
-  try {
-    sensorData = parsePacket(data);
-  } catch (e) {
-    this.emit('badpacket', e);
-    return this;
-  }
-
-  // emit an event to alert that we got new sensor data
-  this.emit('data', sensorData);
-
+// handle when a parsed data packet is received from the robot
+Robot.prototype._handleSensorData = function (sensorData) {
   // if there was previous sensor data, handle pertinent state changes and emit
   // events as appropriate.
   if (this.lastSensorData) {
