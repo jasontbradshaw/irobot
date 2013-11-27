@@ -410,27 +410,10 @@ var SENSORS = {
   }
 };
 
-// the various demos the robot can perform. these map to the data byte sent with
-// the 'demo' command.
-var DEMOS = {
-  ABORT: 255, // same as -1
-  COVER: 0,
-  COVER_AND_DOCK: 1,
-  SPOTCOVER: 2,
-  MOUSE: 3,
-  FIGUREEIGHT: 4,
-  WIMP: 5,
-  HOME: 6,
-  TAG: 7,
-  PACHELBEL: 8,
-  BANJO: 9
-};
-
 // the byte that starts all data packets that come from the robot
 var PACKET_HEADER = 19;
 
 module.exports = {
   SENSORS: SENSORS,
-  DEMOS: DEMOS,
   PACKET_HEADER: PACKET_HEADER
 };

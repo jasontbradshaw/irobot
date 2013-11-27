@@ -6,6 +6,7 @@ var extend = require('node.extend');
 var serialport = require('serialport');
 
 var commands = require('./commands');
+var demos = require('./demos');
 var oiEnums = require('./oi-enums');
 
 // convert a Hertz value into a MIDI number
@@ -138,7 +139,6 @@ util.inherits(Robot, events.EventEmitter);
 
 // inherit enums from the other module, to simplify access to them
 Robot.SENSORS = oiEnums.SENSORS;
-Robot.DEMOS = oiEnums.DEMOS;
 
 // collect serial data in an internal buffer until we receive an entire packet,
 // and then emit a 'packet' event so that packet can be specifically parsed.
@@ -288,13 +288,13 @@ Robot.prototype.demo = function (demoId) {
 
 // stop any currently active demo
 Robot.prototype.abortDemo = function () {
-  this._sendCommand(commands.Demo, oiEnums.DEMOS.ABORT);
+  this._sendCommand(commands.Demo, demos.Abort);
   return this;
 };
 
 // tell the robot to seek out and mate with its dock
 Robot.prototype.dock = function () {
-  this.demo(Robot.DEMOS.COVER_AND_DOCK);
+  this.demo(demos.CoverAndDock);
   return this;
 };
 
