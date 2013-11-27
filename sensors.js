@@ -147,9 +147,125 @@ module.exports.isValidSensorPacket = function (packet) {
   return !(checksum & 0xFF);
 };
 
-var prettifySensorData = function (rawSensorData) {
-  // TODO: parse the initial sensor data object into a more useful version
-  return rawSensorData;
+// parse an initial raw sensor data object into a more useful version
+var prettifySensorData = function (raw) {
+  var data = {};
+
+  // consolidate various sensor data into more localized representations
+  data.wheels = {
+    right: {
+      dropped: raw.bump_and_wheel_drop.wheel_drop.right,
+      overcurrent: raw.low_side_driver_and_wheel_overcurrents.wheel.right
+    },
+    left: {
+      dropped: raw.bump_and_wheel_drop.wheel_drop.left,
+      overcurrent: raw.low_side_driver_and_wheel_overcurrents.wheel.left
+    },
+    caster: {
+      dropped: raw.bump_and_wheel_drop.wheel_drop.caster
+    }
+  };
+
+  // give the low side drivers explicit overcurrent properties
+  data.low_side_drivers = _.map(raw.low_side_driver_and_wheel_overcurrents.low_side_drivers, function (lsd) {
+    return  { overcurrent: lsd }
+  });
+
+  data.bumpers = {
+    left: { activated: raw.bump_and_wheel_drop.bump.left },
+    right: { activated: raw.bump_and_wheel_drop.bump.right },
+    both: {
+      // true if both bumpers are activated at once
+      activated: (raw.bump_and_wheel_drop.bump.right &&
+                  raw.bump_and_wheel_drop.bump.left)
+    }
+  };
+
+  data.cliff_sensors = {
+    left: {
+      detecting: raw.cliff_left,
+      signal: raw.cliff_left_signal
+    },
+    front_left: {
+      detecting: raw.cliff_front_left,
+      signal: raw.cliff_front_left_signal
+    },
+    front_right: {
+      detecting: raw.cliff_front_right,
+      signal: raw.cliff_fron_right_signal
+    },
+    right: {
+      detecting: raw.cliff_right,
+      signal: raw.cliff_right_signal
+    },
+  };
+
+  data.wall_sensor = {
+    detecting: raw.wall,
+    signal: raw.wall_signal
+  };
+
+  data.virtual_wall_sensor = {
+    detecting: raw.virtual_wall
+  };
+
+  data.ir = {
+    receiving: raw.infrared_byte.receiving,
+    received_value: raw.infrared_byte.receiving ? raw.infrared_byte.value : null
+  };
+
+  data.buttons = {
+    advance: { pressed: raw.buttons.advance },
+    play: { pressed: raw.buttons.play }
+  };
+
+  data.battery = {
+    // whether the battery is recharging right now, and the source it's from
+    charging: !raw.charging_state.not_charging,
+    charge: {
+      type: _.omit(raw.charging_sources_available, 'not_charging'),
+      from: raw.charging_sources_available
+    },
+
+    voltage: raw.voltage,
+    current: raw.current,
+
+    temperature: {
+      celsius: raw.battery_temperature.celsius,
+      fahrenheit: raw.battery_temperature.celsius * 9 / 5 + 32,
+    },
+
+    capacity: {
+      current: raw.battery_charge,
+      max: raw.battery_capacity,
+    }
+  };
+
+  data.cargo_bay = {
+    device_detect_baudrate_change: raw.cargo_bay_digital_inputs.device_detect_baudrate_change,
+    digital_input: raw.cargo_bay_digital_inputs.digital_inputs,
+    analog_signal: raw.cargo_bay_analog_signal
+  };
+
+  data.song = {
+    playing: raw.song_playing,
+    number: raw.song_number
+  };
+
+  data.state = {
+    mode: raw.oi_mode,
+    distance: raw.distance,
+    angle: raw.angle,
+
+    requested_velocity: raw.requested_velocity,
+    requested_radius: raw.requested_radius,
+    requested_right_velocity: raw.requested_right_velocity,
+    requested_left_velocity: raw.requested_left_velocity,
+  };
+
+  // NOTE: we ignore "number_stream_packets" (why would it be needed anyway?)
+
+  return data;
 };
 
 // parse a complete data packet byte array and return the parsed results
@@ -279,7 +395,7 @@ _.extend(module.exports, {
   Voltage: new Packet('voltage', 22, 2, buildParseInt('millivolts')),
   Current: new Packet('current', 23, 2, buildParseInt('milliamp_hours')),
 
-  BatteryTemperature: new Packet('battery_temperature', 24, 1, buildParseInt('celcius', true)),
+  BatteryTemperature: new Packet('battery_temperature', 24, 1, buildParseInt('celsius', true)),
   BatteryCharge: new Packet('battery_charge', 25, 2, buildParseInt('milliamp_hours')),
   BatteryCapacity: new Packet('battery_capacity', 26, 2, buildParseInt('milliamp_hours')),
 
