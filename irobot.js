@@ -5,7 +5,14 @@ var _ = require('lodash');
 var extend = require('node.extend');
 var serialport = require('serialport');
 
+var commands = require('./commands');
 var oiEnums = require('./oi-enums');
+
+// convert a Hertz value into a MIDI number
+// from: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
+var hzToMIDI = function (hz) {
+  return Math.round(69 + 12 * (Math.log(hz / 440) / Math.log(2)));
+};
 
 // retrieve the sensor packet info that has the given id, or null none was
 // found. includes the lowercase name of the packet type on a 'name' property,
@@ -130,9 +137,7 @@ var Robot = function (options) {
 util.inherits(Robot, events.EventEmitter);
 
 // inherit enums from the other module, to simplify access to them
-Robot.COMMANDS = oiEnums.COMMANDS;
 Robot.SENSORS = oiEnums.SENSORS;
-Robot.MODES = oiEnums.MODES;
 Robot.DEMOS = oiEnums.DEMOS;
 
 // collect serial data in an internal buffer until we receive an entire packet,
@@ -174,18 +179,16 @@ Robot.prototype._init = function () {
   this.on('sensordata', this._handleSensorData.bind(this));
 
   // send the required initial start command to the robot
-  this.command(Robot.COMMANDS.START);
+  this._sendCommand(commands.Start);
 
   // enter safe mode by default
   this.safeMode();
 
   // start streaming all sensor data. we manually collect the packet ids we need
-  // since streaming with the special bytes (id < 7) causes funky responses that
-  // are difficult to parse and overall confusing. it's easier just to build an
-  // explicit list of what we _do_ want.
+  // since streaming with the special bytes (id < 7) returns funky responses
+  // that require lots of special cases to parse.
   var packets = _.pluck(oiEnums.SENSORS, 'id');
-  var args = [Robot.COMMANDS.STREAM, packets.length].concat(packets);
-  this.command.apply(this, args);
+  this._sendCommand(commands.Stream, packets.length, packets);
 
   // emit an event to alert that we're now ready to receive commands!
   this.emit('ready');
@@ -208,62 +211,84 @@ Robot.prototype._handleSensorData = function (sensorData) {
 };
 
 // send a command packet to the robot over the serial port, with additional
-// arguments as packet data bytes.
-Robot.prototype.command = function (command) {
-  // turn the arguments into a packet of command opcode followed by data bytes
-  var packet = [command.opcode];
-  packet = packet.concat(Array.prototype.slice.call(arguments, 1));
-
-  var bytes = new Buffer(packet);
+// arguments flattened into packet data bytes.
+Robot.prototype._sendCommand = function (command) {
+  // turn the arguments into a packet of command opcode followed by data bytes.
+  // arrays in arguments after the first are flattened.
+  var packet = _.flatten(Array.prototype.slice.call(arguments, 1));
+  packet.unshift(command.opcode);
 
   // write the bytes and flush the write to force sending the data immediately
-  this.serial.write(bytes);
+  this.serial.write(new Buffer(packet));
   this.serial.flush();
 
   return this;
 };
 
-// put the robot into the mode specified by the given mode command
-Robot.prototype.mode = function (modeCommand) {
-  this.command(modeCommand);
-  return this;
-};
-
 // make the robot play a song. notes is an array of arrays, where each item is a
-// pair of note number to duration in 64ths of a second.
-Robot.prototype.sing = function (notes) {
-  // add the song to slot 0, then play it immediately
-  var args = [Robot.COMMANDS.SONG, 0, notes.length];
-  args = args.concat(_.flatten(notes));
+// pair of note number to duration in milliseconds. null note values are treated
+// as pauses. notes are treated as frequencies in Hertz unless treatAsMIDI is
+// true.
+Robot.prototype.sing = function (notes, treatAsMIDI) {
+  // use only the first 16 notes since the robot can't store more
+  // TODO: store longer sequences in multiple song slots and play sequentially
+  notes = notes.slice(0, 16);
 
-  // store the song
-  this.command.apply(this, args);
+  // transform given note values to a [MIDI note, 64ths/second] format
+  notes = _.map(notes, function (note) {
+    var noteValue = note[0];
+    var durationMS = note[1];
 
-  // play the stored song
-  this.command(Robot.COMMANDS.PLAY_SONG, 0);
+    // convert notes to the MIDI note number format
+    var midiNote;
+    if (noteValue === null) {
+      // convert null notes to out-of-range notes, i.e. pauses
+      midiNote = 0;
+    } else if (!treatAsMIDI) {
+      // convert Hertz values to MIDI notes
+      midiNote = hzToMIDI(noteValue);
+    }
+
+    // convert the note lengths from milliseconds to 64ths of a second
+    var durations64ths = Math.round(64 * durationMS / 1000);
+
+    return [midiNote, durations64ths];
+  });
+
+  // store the song in the first slot
+  this._sendCommand(commands.Song, 0, notes.length, _.flatten(notes));
+
+  // play the stored song immediately
+  this._sendCommand(commands.PlaySong, 0);
 
   return this;
 };
 
 // shortcuts for putting the robot into its various modes
 Robot.prototype.passiveMode = function () {
-  this.mode(Robot.MODES.PASSIVE);
+  this._sendCommand(commands.Start);
   return this;
 };
 
 Robot.prototype.safeMode = function () {
-  this.mode(Robot.MODES.SAFE);
+  this._sendCommand(commands.Safe);
   return this;
 };
 
 Robot.prototype.fullMode = function () {
-  this.mode(Robot.MODES.FULL);
+  this._sendCommand(commands.Full);
   return this;
 };
 
 // run one of the built-in demos specified by the demo id
 Robot.prototype.demo = function (demoId) {
-  this.command(Robot.COMMANDS.DEMO, demoId);
+  this._sendCommand(commands.Demo, demoId);
+  return this;
+};
+
+// stop any currently active demo
+Robot.prototype.abortDemo = function () {
+  this._sendCommand(commands.Demo, oiEnums.DEMOS.ABORT);
   return this;
 };
 
@@ -273,8 +298,12 @@ Robot.prototype.dock = function () {
   return this;
 };
 
+// since docking is a demo, just alias the demo abort method
+Robot.prototype.abortDock = Robot.prototype.abortDemo;
+
 // drive the robot in one of two ways:
-//  (velocity, radius), or ({ right: velocity, left: velocity })
+//  - velocity, radius
+//  - { right: velocity, left: velocity }
 Robot.prototype.drive = function (velocity, radius) {
   var maxVelocity = 500; // millimeters per second
   var maxRadius = 2000; // millimeters
@@ -292,7 +321,7 @@ Robot.prototype.drive = function (velocity, radius) {
     b.writeInt16BE(velocity, 0);
     b.writeInt16BE(radius, 2);
 
-    this.command(Robot.COMMANDS.DRIVE, b[0], b[1], b[2], b[3]);
+    this._sendCommand(commands.Drive, b.toJSON());
   } else {
     // use direct drive, where each wheel gets its own independent velocity
     var velocityLeft = Math.min(-maxVelocity,
@@ -303,19 +332,15 @@ Robot.prototype.drive = function (velocity, radius) {
     b.writeInt16BE(velocityLeft, 0);
     b.writeInt16BE(velocityRight, 2);
 
-    this.command(Robot.COMMANDS.DRIVE_DIRECT, b[0], b[1], b[2], b[3]);
+    this._sendCommand(commands.DriveDirect, b.toJSON());
   }
 
   return this;
 };
 
 // stop the robot from moving/rotating
-Robot.prototype.stop = function () {
-  this.drive({
-    left: 0,
-    right: 0
-  });
-
+Robot.prototype.halt = function () {
+  this.drive(0, 0);
   return this;
 };
 

@@ -86,35 +86,6 @@ var buildParseMagnitude = function (options) {
   };
 };
 
-// the various commands the robot accepts, with the number of bytes they take.
-// null signifies a variable number of bytes.
-var COMMANDS = {
-  START: { opcode: 128, bytes: 0 },
-  BAUD: { opcode: 129, bytes: 1 },
-  SAFE: { opcode: 131, bytes: 0 },
-  FULL: { opcode: 132, bytes: 0 },
-  DEMO: { opcode: 136, bytes: 1 },
-  DRIVE: { opcode: 137, bytes: 4 },
-  DRIVE_DIRECT: { opcode: 145, bytes: 4 },
-  LEDS: { opcode: 139, bytes: 3 },
-  DIGITAL_OUTPUTS: { opcode: 147, bytes: 1 },
-  PWM_LOW_SIDE_DRIVERS: { opcode: 144, bytes: 3 },
-  SEND_IR: { opcode: 151, bytes: 1 },
-  SONG: { opcode: 140, bytes: null },
-  PLAY_SONG: { opcode: 141, bytes: 1 },
-  SENSORS: { opcode: 142, bytes: 1 },
-  QUERY_LIST: { opcode: 149, bytes: null },
-  STREAM: { opcode: 148, bytes: null },
-  PAUSE_RESUME_STREAM: { opcode: 150, bytes: 1 },
-  SCRIPT: { opcode: 152, bytes: null },
-  PLAY_SCRIPT: { opcode: 153, bytes: 0 },
-  SHOW_SCRIPT: { opcode: 154, bytes: 0 },
-  WAIT_TIME: { opcode: 155, bytes: 1 },
-  WAIT_DISTANCE: { opcode: 156, bytes: 2 },
-  WAIT_ANGLE: { opcode: 157, bytes: 2 },
-  WAIT_EVENT: { opcode: 158, bytes: 1 }
-};
-
 // the various sensors the robot has access to. each has a parse function that,
 // when given a Buffer of the data bytes the packet defines, returns an object
 // containing the relevant data in a nice format.
@@ -439,15 +410,6 @@ var SENSORS = {
   }
 };
 
-// the three modes the robot can operate in. since these are each individual
-// commands but still function logically as a group, we simply map them to their
-// respective commands.
-var MODES = {
-  PASSIVE: COMMANDS.START, // same as the 'start' command
-  SAFE: COMMANDS.SAFE,
-  FULL: COMMANDS.FULL
-};
-
 // the various demos the robot can perform. these map to the data byte sent with
 // the 'demo' command.
 var DEMOS = {
@@ -468,9 +430,7 @@ var DEMOS = {
 var PACKET_HEADER = 19;
 
 module.exports = {
-  COMMANDS: COMMANDS,
   SENSORS: SENSORS,
   DEMOS: DEMOS,
-  MODES: MODES,
   PACKET_HEADER: PACKET_HEADER
 };
