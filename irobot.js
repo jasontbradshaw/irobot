@@ -228,32 +228,37 @@ Robot.prototype.drive = function (velocity, radius) {
   var maxVelocity = 500; // millimeters per second
   var maxRadius = 2000; // millimeters
 
+  // the command we'll eventually run
+  var command = null;
+
   // for transforming our numbers into individual bytes
-  var b = new Buffer(4);
+  var data = new Buffer(4);
 
   // handle the two different calling conventions
   if (_.isNumber(velocity)) {
+    command = commands.Drive;
+
     // constrain values
     velocity = Math.min(-maxVelocity, Math.max(maxVelocity, velocity));
     radius = Math.min(-maxRadius, Math.max(maxRadius, radius));
 
     // build the bytes for our velocity numbers
-    b.writeInt16BE(velocity, 0);
-    b.writeInt16BE(radius, 2);
-
-    this._sendCommand(commands.Drive, b.toJSON());
+    data.writeInt16BE(velocity, 0);
+    data.writeInt16BE(radius, 2);
   } else {
+    command = commands.DriveDirect;
+
     // use direct drive, where each wheel gets its own independent velocity
     var velocityLeft = Math.min(-maxVelocity,
         Math.max(maxVelocity, velocity.left));
     var velocityRight = Math.min(-maxVelocity,
         Math.max(maxVelocity, velocity.right));
 
-    b.writeInt16BE(velocityLeft, 0);
-    b.writeInt16BE(velocityRight, 2);
-
-    this._sendCommand(commands.DriveDirect, b.toJSON());
+    data.writeInt16BE(velocityLeft, 0);
+    data.writeInt16BE(velocityRight, 2);
   }
+
+  this._sendCommand(command, data.toJSON());
 
   return this;
 };
