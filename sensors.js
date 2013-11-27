@@ -1,84 +1,46 @@
 var _ = require('lodash');
-var extend = require('node.extend');
 
-// turn a buffer into an int intelligently depending on its length
-var bufferToInt = function (buffer, signed) {
-  // builds something like 'readUInt8' or 'readInt32'
-  var method = [
-    'read',
-    signed ? '' : 'U',
-    'Int',
-    buffer.length * 8,
-    buffer.length > 1 ? 'BE' : ''
-  ].join('');
-
-  return buffer[method](0);
-};
-
-// return a value as a percentage scaled to the given ranges
-var scaleValue = function (rawValue, options) {
-  var defaults = {
-    min_raw: 0,
-    min_actual: 0
-  };
-  options = extend(defaults, options);
-
-  var rangeRaw = options.max_raw - options.min_raw;
-  var rangeActual = options.max_actual - options.min_actual;
-  return (1.0 * rawValue / rangeRaw) * rangeActual;
-};
-
-// parse the first byte as a boolean and return it
-var parseBool = function (bytes) { return !!(bytes[0]); }
-
-// parse the given bytes into an unsigned integer
-var parseUnsigned = function (bytes) { return bufferToInt(bytes); }
+var misc = require('./misc');
 
 // parse the given bytes into a signed integer
-var parseSigned = function (bytes) { return bufferToInt(bytes, true); }
+var parseSigned = _.partialRight(misc.bufferToInt, true);
 
-// return the bits of a byte as a boolean array
-var parseBits = function (b) {
-  // jshint bitwise:false
-  return [
-    !!((b & 0x80) >> 7),
-    !!((b & 0x40) >> 6),
-    !!((b & 0x20) >> 5),
-    !!((b & 0x10) >> 4),
-    !!((b & 0x8) >> 3),
-    !!((b & 0x4) >> 2),
-    !!((b & 0x2) >> 1),
-    !!(b & 0x1)
-  ];
-};
-
+// build a function that takes in some bytes, parses them as an integer, and
+// returns an object with that value assigned to the given key.
 var buildParseInt = function (valueKey, signed) {
   return function (bytes) {
     var result = {};
-    result[valueKey] = bufferToInt(bytes, signed);
+    result[valueKey] = misc.bufferToInt(bytes, signed);
     return result;
   };
 };
 
+// build a function that takes in some bytes, parses them as an unsigned int,
+// then scales the returned value between the minimum and maximum values
+// provided, then returns an object with min_{{key}}, max_{{key}}, and {{key}}
+// values.
 var buildParseScaled = function (actualValueKey, options) {
   return function (bytes) {
     var result = {};
 
     result['min_' + actualValueKey] = options.min_actual || 0;
     result['max_' + actualValueKey] = options.max_actual;
-    result[actualValueKey] = scaleValue(bufferToInt(bytes), options);
+    result[actualValueKey] = misc.scaleValue(misc.bufferToInt(bytes), options);
 
     return result;
   };
 };
 
+// build a function that takes in some bytes, parses them as an unsigned int,
+// and returns an object with useful data about the value's magnitude between
+// some minimum and maximum.
 var buildParseMagnitude = function (options) {
   return function (bytes) {
     var result = {
       min: options.min,
       max: options.max,
       range: options.max - options.min,
-      raw: bufferToInt(bytes)
+      raw: misc.bufferToInt(bytes)
     };
 
     result.magnitude = 1.0 * result.raw / result.range;
@@ -87,6 +49,8 @@ var buildParseMagnitude = function (options) {
   };
 };
 
+// stores data about a sensor packet, and holds a function that parses its raw
+// bytes into a more descriptive object format.
 var Packet = function (name, id, bytes, parser) {
   this.name = name;
   this.id = id;
@@ -96,7 +60,7 @@ var Packet = function (name, id, bytes, parser) {
   this.parser = _.isFunction(parser) ? parser : function () {};
 };
 
-// proxy to the start function given on creation
+// proxy to the parser function given on creation
 Packet.prototype.parse = function () {
   return this.parser.apply(this, arguments);
 };
@@ -306,7 +270,7 @@ module.exports.parseSensorData = function (data) {
 // create and export all the various sensor packet types
 _.extend(module.exports, {
   BumpAndWheelDrop: new Packet('bump_and_wheel_drop', 7, 1, function (bytes) {
-    var bits = parseBits(bytes[0]);
+    var bits = misc.byteToBits(bytes[0]);
 
     var wheelDropCaster = bits[4];
     var wheelDropLeft = bits[3];
@@ -328,15 +292,15 @@ _.extend(module.exports, {
     };
   }),
 
-  Wall: new Packet('wall', 8, 1, parseBool),
-  CliffLeft: new Packet('cliff_left', 9, 1, parseBool),
-  CliffFrontLeft: new Packet('cliff_front_left', 10, 1, parseBool),
-  CliffFrontRight: new Packet('cliff_front_right', 11, 1, parseBool),
-  CliffRight: new Packet('cliff_right', 12, 1, parseBool),
-  VirtualWall: new Packet('virtual_wall', 13, 1, parseBool),
+  Wall: new Packet('wall', 8, 1, misc.byteToBool),
+  CliffLeft: new Packet('cliff_left', 9, 1, misc.byteToBool),
+  CliffFrontLeft: new Packet('cliff_front_left', 10, 1, misc.byteToBool),
+  CliffFrontRight: new Packet('cliff_front_right', 11, 1, misc.byteToBool),
+  CliffRight: new Packet('cliff_right', 12, 1, misc.byteToBool),
+  VirtualWall: new Packet('virtual_wall', 13, 1, misc.byteToBool),
 
   Overcurrents: new Packet('low_side_driver_and_wheel_overcurrents', 14, 1, function (bytes) {
-    var bits = parseBits(bytes[0]);
+    var bits = misc.byteToBits(bytes[0]);
 
     var leftWheel = bits[4];
     var rightWheel = bits[3];
@@ -370,7 +334,7 @@ _.extend(module.exports, {
   }),
 
   Buttons: new Packet('buttons', 18, 1, function (bytes) {
-    var bits = parseBits(bytes[0]);
+    var bits = misc.byteToBits(bytes[0]);
     return {
       advance: bits[2],
       play: bits[0]
@@ -425,7 +389,7 @@ _.extend(module.exports, {
   })),
 
   CargoBayDigitalInputs: new Packet('cargo_bay_digital_inputs', 32, 1, function (bytes) {
-    var bits = parseBits(bytes[0]);
+    var bits = misc.byteToBits(bytes[0]);
 
     var deviceDetectBaudrateChange = bits[4];
     var digitalInput3 = bits[3];
@@ -451,7 +415,7 @@ _.extend(module.exports, {
   })),
 
   ChargingSourcesAvailable: new Packet('charging_sources_available', 34, 1, function (bytes) {
-    var bits = parseBits(bytes[0]);
+    var bits = misc.byteToBits(bytes[0]);
     return {
       home_base: bits[1],
       internal_charger: bits[0]
@@ -468,9 +432,9 @@ _.extend(module.exports, {
     };
   }),
 
-  SongNumber: new Packet('song_number', 36, 1, parseUnsigned),
-  SongPlaying: new Packet('song_playing', 37, 1, parseBool),
-  NumberStreamPackets: new Packet('number_stream_packets', 38, 1, parseUnsigned),
+  SongNumber: new Packet('song_number', 36, 1, misc.bufferToInt),
+  SongPlaying: new Packet('song_playing', 37, 1, misc.byteToBool),
+  NumberStreamPackets: new Packet('number_stream_packets', 38, 1, misc.bufferToInt),
   RequestedVelocity: new Packet('requested_velocity', 39, 2, parseSigned),
   RequestedRadius: new Packet('requested_radius', 40, 2, parseSigned),
   RequestedRightVelocity: new Packet('requested_right_velocity', 41, 2, parseSigned),

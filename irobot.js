@@ -9,12 +9,6 @@ var commands = require('./commands');
 var demos = require('./demos');
 var sensors = require('./sensors');
 
-// convert a Hertz value into a MIDI number
-// from: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
-var hzToMIDI = function (hz) {
-  return Math.round(69 + 12 * (Math.log(hz / 440) / Math.log(2)));
-};
-
 var Robot = function (options) {
   events.EventEmitter.call(this);
 
@@ -154,8 +148,9 @@ Robot.prototype.sing = function (notes, treatAsMIDI) {
       // convert null notes to out-of-range notes, i.e. pauses
       midiNote = 0;
     } else if (!treatAsMIDI) {
-      // convert Hertz values to MIDI notes
-      midiNote = hzToMIDI(noteValue);
+      // convert the Hertz value to a MIDI note number
+      // see: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
+      midiNote = Math.round(69 + 12 * (Math.log(noteValue / 440) / Math.log(2)));
     }
 
     // convert the note lengths from milliseconds to 64ths of a second
