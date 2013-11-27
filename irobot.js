@@ -8,6 +8,7 @@ var serialport = require('serialport');
 var commands = require('./commands');
 var demos = require('./demos');
 var sensors = require('./sensors');
+var songs = require('./songs');
 
 var Robot = function (options) {
   events.EventEmitter.call(this);
@@ -102,8 +103,12 @@ Robot.prototype._init = function () {
   var packets = _.pluck(sensors.ALL_SENSOR_PACKETS, 'id');
   this._sendCommand(commands.Stream, packets.length, packets);
 
-  // emit an event to alert that we're now ready to receive commands!
-  this.emit('ready');
+  this.sing(songs.START);
+
+  // emit an event to alert that we're now ready to receive commands! we wait
+  // for a bit to allow the song to finish playing and so that we'll have
+  // hopefully received some sensor data by then.
+  setTimeout(_.bind(this.emit, this, 'ready'), 250);
 
   return this;
 };
@@ -139,40 +144,42 @@ Robot.prototype._sendCommand = function (command) {
 
 // make the robot play a song. notes is an array of arrays, where each item is a
 // pair of note number to duration in milliseconds. null note values are treated
-// as pauses. notes are treated as frequencies in Hertz unless treatAsMIDI is
-// true.
+// as pauses, as are out-of-range values. notes are treated as frequencies in
+// Hertz unless treatAsMIDI is set to true.
 Robot.prototype.sing = function (notes, treatAsMIDI) {
   // use only the first 16 notes since the robot can't store more
   // TODO: store longer sequences in multiple song slots and play sequentially
-  notes = notes.slice(0, 16);
+  notes = (notes || []).slice(0, 16);
 
-  // transform given note values to a [MIDI note, 64ths/second] format
-  notes = _.map(notes, function (note) {
-    var noteValue = note[0];
-    var durationMS = note[1];
+  if (notes.length > 0) {
+    // transform given note values to a [MIDI note, 64ths/second] format
+    notes = _.map(notes, function (note) {
+      var noteValue = note[0];
+      var durationMS = note[1];
 
-    // convert notes to the MIDI note number format
-    var midiNote;
-    if (noteValue === null) {
-      // convert null notes to out-of-range notes, i.e. pauses
-      midiNote = 0;
-    } else if (!treatAsMIDI) {
-      // convert the Hertz value to a MIDI note number
-      // see: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
-      midiNote = Math.round(69 + 12 * (Math.log(noteValue / 440) / Math.log(2)));
-    }
+      // convert notes to the MIDI note number format
+      var midiNote;
+      if (noteValue === null) {
+        // convert null notes to out-of-range notes, i.e. pauses
+        midiNote = 0;
+      } else if (!treatAsMIDI) {
+        // convert the Hertz value to a MIDI note number
+        // see: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
+        midiNote = Math.round(69 + 12 * (Math.log(noteValue / 440) / Math.log(2)));
+      }
 
-    // convert the note lengths from milliseconds to 64ths of a second
-    var durations64ths = Math.round(64 * durationMS / 1000);
+      // convert the note lengths from milliseconds to 64ths of a second
+      var durations64ths = Math.round(64 * durationMS / 1000);
 
-    return [midiNote, durations64ths];
-  });
+      return [midiNote, durations64ths];
+    });
 
-  // store the song in the first slot
-  this._sendCommand(commands.Song, 0, notes.length, _.flatten(notes));
+    // store the song in the first slot
+    this._sendCommand(commands.Song, 0, notes.length, notes);
 
-  // play the stored song immediately
-  this._sendCommand(commands.PlaySong, 0);
+    // play the stored song immediately
+    this._sendCommand(commands.PlaySong, 0);
+  }
 
   return this;
 };

@@ -1,10 +1,8 @@
 var Robot = require('./irobot').Robot;
+var songs = require('./songs');
 
 var robot = new Robot({ device: '/dev/ttyUSB0' });
 
-robot.on('sensordata', function (data) {
-  console.log(
-    '\n--------------------------------------------------------------------\n',
-    JSON.stringify(data, null, '  ')
-  );
+robot.on('ready', function () {
+  robot.sing(songs.OMINOUS);
 });
