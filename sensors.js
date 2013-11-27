@@ -367,9 +367,7 @@ module.exports.ALL_SENSOR_PACKETS = _(module.exports).pick(function (p) {
 }).values().sortBy('id').value();
 
 // create a map of packet ids to packets
-module.exports.SENSOR_PACKETS_BY_ID = {}
-_.each(module.exports, function (p) {
-  if (p instanceof Packet) {
-    module.exports.SENSOR_PACKETS_BY_ID[p.id] = p;
-  }
+module.exports.SENSOR_PACKETS_BY_ID = {};
+_.each(module.exports.ALL_SENSOR_PACKETS, function (p) {
+  module.exports.SENSOR_PACKETS_BY_ID[p.id] = p;
 });
