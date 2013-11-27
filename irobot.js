@@ -7,19 +7,6 @@ var serialport = require('serialport');
 
 var oiEnums = require('./oi-enums');
 
-// convert an 'UPPER_SNAKE' or 'lower_snake' string to 'lowerCamelCase'
-var snakeToCamel = function (s) {
-  var result = s;
-
-  if (_.isString(s)) {
-    result = s.toLowerCase().replace(/_([a-z0-9])/gi, function (match, letter) {
-      return letter.toUpperCase();
-    });
-  }
-
-  return result;
-};
-
 // retrieve the sensor packet info that has the given id, or null none was
 // found. includes the lowercase name of the packet type on a 'name' property,
 // inluding the other data on its enum.
@@ -27,7 +14,7 @@ var getSensorIdInfo = _.memoize(function (id) {
   var result = null;
 
   // find the sensor packet info that has the given id
-  _.each(Robot.SENSORS, function (info, name) {
+  _.each(oiEnums.SENSORS, function (info, name) {
     if (info.id === id) {
       // make a copy of the sensor info so we can modify it
       result = _.extend({}, info);
@@ -71,6 +58,7 @@ var parsePacket = function (data) {
     checksum += data[i];
   }
 
+  // jshint bitwise:false
   if (checksum & 0x01) {
     throw new Error('packet checksum (' + checksum + ') failed');
   }
@@ -154,14 +142,14 @@ Robot.prototype._serialParser = function (emitter, data) {
   var i, length, b;
 
   // add the received bytes to our internal buffer
-  for (i = 0, length = data.length, b; i < length, b = data[i]; i++) {
+  for (i = 0, length = data.length, b; i < length, (b = data[i]); i++) {
     this._buffer.push(b);
   }
 
   // attempt to find a packet header in our stored bytes
   var packetHeaderIndex = -1;
   var packetLengthIndex = -1;
-  for (i = 0, length = this._buffer.length, b; i < length, b = data[i]; i++) {
+  for (i = 0, length = this._buffer.length, b; i < length, (b = data[i]); i++) {
     if (b === oiEnums.PACKET_HEADER) {
       // store the indexes we'll need to continue parsing
       packetHeaderIndex = i;
@@ -205,8 +193,8 @@ Robot.prototype._init = function () {
   // enter safe mode by default
   this.safeMode();
 
-  // start streaming all sensor data, generating data every 15ms
-  this.command(Robot.COMMANDS.STREAM, 6, Robot.SENSORS.ALL.id);
+  // start streaming all sensor data
+  this.command(Robot.COMMANDS.STREAM, 1, oiEnums.SENSORS.ALL.id);
 
   // emit an event to alert that we're now ready to receive commands!
   this.emit('ready');
