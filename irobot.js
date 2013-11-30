@@ -156,11 +156,15 @@ Robot.getSensorData = function () {
 };
 
 // make the robot play a song. notes is an array of arrays, where each item is a
-// pair of note frequency in Hertz and its duration in milliseconds. non-numeric
-// note values (like null) are treated as pauses, as are out-of-range values.
+// pair of note frequency in Hertz followed by its duration in milliseconds.
+// non-numeric note values (like null) and out-of-range notes are treated as
+// pauses.
 Robot.prototype.sing = function (notes) {
   if (notes && notes.length > 0) {
-    // split the notes into segments and add them to song slots sequentially
+    // create a copy of the notes array so we can modify it at-will
+    notes = notes.slice();
+
+    // split the notes into song-length segments for sequential playback
     var segments = [];
     while (notes.length > 0) {
       segments.push(notes.splice(0, songs.MAX_LENGTH));
@@ -168,50 +172,32 @@ Robot.prototype.sing = function (notes) {
 
     // fill all the available song slots with our segments, and store their
     // durations away so we can set timeouts to play them in turn.
-    var delays = _.map(segments.splice(0, songs.MAX_SONGS), function (seg, slot) {
-      // store the converted song in the given slot
-      var song = songs.toCreateFormat(seg);
-      this._sendCommand(commands.Song, slot, song.length, song);
-
-      // calculate and return the delay from the 64ths of second parts, since it
-      // will be more accurate than using the milliseconds, which were lossily
-      // converted to 64ths of a second before being stored on the robot.
-      var sixtyFourthsDuration = 0;
-      _.each(song, function (note) { sixtyFourthsDuration += note[1]; });
-
-      // use ceil so we don't accidentally call our callback before the previous
-      // segment is done, which would cause the new requested playback to fail.
-      return Math.ceil(sixtyFourthsDuration * 1000 / 64);
-    }, this);
-
-    // schedule all the segments for playback, one after another
     var cumulativeDelay = 0;
-    _.each(delays, function (delay, index) {
-      setTimeout(_.bind(this._playSong, this, index), cumulativeDelay);
-      cumulativeDelay += delay;
-    }, this);
+    for (var i = 0; i < segments.length; i++) {
+      var song = songs.toCreateFormat(segments[i]);
 
-    // if there are segments still left, schedule another #sing() call after the
-    // final segment is done. we give it our remaining notes and let it
-    // overwrite the now-finished song slots.
-    if (segments.length > 0) {
-      // only flatten to one level, since we need to keep the note pairs
-      var remainingNotes = _.flatten(segments, true);
-      setTimeout(_.bind(this.sing, this, remainingNotes), cumulativeDelay);
+      // schedule this segment for storage and playback
+      setTimeout(_.bind(this._storeAndPlaySong, this, song), cumulativeDelay);
+
+      // calculate the delay from the 64ths of second parts, since it will be
+      // more accurate than using the milliseconds, which were lossily converted
+      // to 64ths of a second before being stored on the robot. we use ceil so
+      // we don't accidentally call our callback before the previous segment is
+      // done, which would cause the new requested playback to fail.
+      var duration = 0;
+      for (var j = song.length - 1; j >= 0; j--) { duration += song[j][1]; }
+      cumulativeDelay += Math.ceil(duration * 1000 / 64);
     }
   }
 
   return this;
 };
 
-// start the playback of the given song number
-Robot.prototype._playSong = function (index) {
-  this._sendCommand(commands.PlaySong, index);
-};
-
-// start the playback of the given song number
-Robot.prototype._playSong = function (index) {
-  this._sendCommand(commands.PlaySong, index);
+// store a song in the first song slot, then immediately request its playback
+Robot.prototype._storeAndPlaySong = function (notes) {
+  var slot = 0;
+  this._sendCommand(commands.Song, slot, notes.length, notes);
+  this._sendCommand(commands.PlaySong, slot);
 };
 
 // put the robot into passive mode
