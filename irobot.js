@@ -164,17 +164,12 @@ Robot.prototype.sing = function (notes) {
     // create a copy of the notes array so we can modify it at-will
     notes = notes.slice();
 
-    // split the notes into song-length segments for sequential playback
-    var segments = [];
-    while (notes.length > 0) {
-      segments.push(notes.splice(0, songs.MAX_LENGTH));
-    }
-
     // fill all the available song slots with our segments, and store their
     // durations away so we can set timeouts to play them in turn.
     var cumulativeDelay = 0;
-    for (var i = 0; i < segments.length; i++) {
-      var song = songs.toCreateFormat(segments[i]);
+    while (notes.length > 0) {
+      // convert the next song-length segment and reduce the notes array
+      var song = songs.toCreateFormat(notes.splice(0, songs.MAX_SONG_LENGTH));
 
       // schedule this segment for storage and playback
       setTimeout(_.bind(this._storeAndPlaySong, this, song), cumulativeDelay);

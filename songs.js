@@ -1,7 +1,7 @@
 var _ = require('lodash');
 
-module.exports.MAX_LENGTH = 16;
-module.exports.MAX_SONGS = 16;
+module.exports.MAX_SONG_LENGTH = 16;
+module.exports.MAX_STORED_SONGS = 16;
 
 // convert an array from Hertz/milliseconds format to MIDI note/64ths of a second
 module.exports.toCreateFormat = function (notes) {

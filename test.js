@@ -4,7 +4,5 @@ var songs = require('./songs');
 var robot = new Robot('/dev/ttyUSB0');
 
 robot.on('ready', function () {
-  setTimeout(function () {
-    robot.sing(songs.IMPERIAL_MARCH);
-  }, 500);
+  robot.sing(songs.IMPERIAL_MARCH);
 });
