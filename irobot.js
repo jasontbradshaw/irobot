@@ -159,37 +159,59 @@ Robot.getSensorData = function () {
 // pair of note frequency in Hertz and its duration in milliseconds. non-numeric
 // note values (like null) are treated as pauses, as are out-of-range values.
 Robot.prototype.sing = function (notes) {
-  // use only the first 16 notes since the robot can't store more
-  // TODO: store longer sequences in multiple song slots and play sequentially
-  notes = (notes || []).slice(0, 16);
+  if (notes && notes.length > 0) {
+    // split the notes into segments and add them to song slots sequentially
+    var segments = [];
+    while (notes.length > 0) {
+      segments.push(notes.splice(0, songs.MAX_LENGTH));
+    }
 
-  if (notes.length > 0) {
-    // transform given note values to a [MIDI note, 64ths/second] format
-    var convertedNotes = _.map(notes, function (note) {
-      var noteValue = note[0];
-      var durationMS = note[1];
+    // fill all the available song slots with our segments, and store their
+    // durations away so we can set timeouts to play them in turn.
+    var delays = _.map(segments.splice(0, songs.MAX_SONGS), function (seg, slot) {
+      // store the converted song in the given slot
+      var song = songs.toCreateFormat(seg);
+      this._sendCommand(commands.Song, slot, song.length, song);
 
-      // non-numeric and out-of-range notes are treated as pauses by the robot
-      var midiNote = 0;
-      if (_.isNumber(noteValue)) {
-        // convert the Hertz value to a MIDI note number
-        // see: http://en.wikipedia.org/wiki/MIDI_Tuning_Standard#Frequency_values
-        midiNote = Math.round(69 + 12 *
-            (Math.log(noteValue / 440) / Math.log(2))); // log base change
-      }
+      // calculate and return the delay from the 64ths of second parts, since it
+      // will be more accurate than using the milliseconds, which were lossily
+      // converted to 64ths of a second before being stored on the robot.
+      var sixtyFourthsDuration = 0;
+      _.each(song, function (note) { sixtyFourthsDuration += note[1]; });
 
-      // convert the note lengths from milliseconds to 64ths of a second
-      var durations64ths = Math.round(64 * durationMS / 1000);
+      // use ceil so we don't accidentally call our callback before the previous
+      // segment is done, which would cause the new requested playback to fail.
+      return Math.ceil(sixtyFourthsDuration * 1000 / 64);
+    }, this);
 
-      return [midiNote, durations64ths];
-    });
+    // schedule all the segments for playback, one after another
+    var cumulativeDelay = 0;
+    _.each(delays, function (delay, index) {
+      setTimeout(_.bind(this._playSong, this, index), cumulativeDelay);
+      cumulativeDelay += delay;
+    }, this);
 
-    // store the song in the first slot, then play it
-    this._sendCommand(commands.Song, 0, convertedNotes.length, convertedNotes);
-    this._sendCommand(commands.PlaySong, 0);
+    // if there are segments still left, schedule another #sing() call after the
+    // final segment is done. we give it our remaining notes and let it
+    // overwrite the now-finished song slots.
+    if (segments.length > 0) {
+      // only flatten to one level, since we need to keep the note pairs
+      var remainingNotes = _.flatten(segments, true);
+      setTimeout(_.bind(this.sing, this, remainingNotes), cumulativeDelay);
+    }
   }
 
   return this;
+};
+
+// start the playback of the given song number
+Robot.prototype._playSong = function (index) {
+  this._sendCommand(commands.PlaySong, index);
+};
+
+// start the playback of the given song number
+Robot.prototype._playSong = function (index) {
+  this._sendCommand(commands.PlaySong, index);
 };
 
 // put the robot into passive mode

@@ -221,7 +221,11 @@ var prettifySensorData = function (raw) {
   };
 
   data.cargo_bay = {
-    device_detect_baudrate_change: raw.cargo_bay_digital_inputs.device_detect_baudrate_change,
+    // these are both the same value since they come to the same cargo bay pin,
+    // but it will make for more readable client code to separate them.
+    device_detected: raw.cargo_bay_digital_inputs.device_detect_baudrate_change,
+    baudrate_change_requested: raw.cargo_bay_digital_inputs.device_detect_baudrate_change,
+
     digital_input: raw.cargo_bay_digital_inputs.digital_inputs,
     analog_signal: raw.cargo_bay_analog_signal
   };
@@ -242,7 +246,7 @@ var prettifySensorData = function (raw) {
     requested_left_velocity: raw.requested_left_velocity,
   };
 
-  // NOTE: we ignore "number_stream_packets" (why would it be needed anyway?)
+  // NOTE: we ignore "number_stream_packets" (who would need that here anyway?)
 
   return data;
 };
