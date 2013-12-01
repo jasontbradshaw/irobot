@@ -84,8 +84,8 @@ module.exports.isValidSensorPacket = function (packet) {
   //
   // checksum is the sum of all bytes in a packet, header to checksum inclusive,
   // that when bitwise-ANDed with 0xFF should produce 0. this is in contrast
-  // with what the docs claim, but this implementation is actually the correct
-  // one.
+  // with what the docs claim, but this implementation has been verified to be
+  // correct.
 
   // if the packet header doesn't match, it's invalid
   var packetHeader = packet[0];

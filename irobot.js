@@ -65,40 +65,6 @@ var Robot = function (device, options) {
 
 util.inherits(Robot, events.EventEmitter);
 
-// run once the serial port reports a connection
-Robot.prototype._init = function () {
-  // send the required initial start command to the robot
-  this._sendCommand(commands.Start);
-
-  // enter safe mode by default
-  this.safeMode();
-
-  // start streaming all sensor data. we manually specify the packet ids we need
-  // since streaming with the special bytes (id < 7) returns responses that
-  // require special cases to correctly parse.
-  var packets = _.pluck(sensors.ALL_SENSOR_PACKETS, 'id');
-  this._sendCommand(commands.Stream, packets.length, packets);
-
-  // give feedback that we've connected
-  this.sing(songs.START);
-
-  // zero the LED values (so we can be sure about what the LED state is), then
-  // turn the power LED green with 100% brightness.
-  this.setLEDs({
-    play: false,
-    advance: false,
-    power_intensity: 1,
-    power_color: 0
-  });
-
-  // emit an event to alert that we're now ready to receive commands once we've
-  // received the first sensor data. that means that the robot is communicating
-  // with us and ready to go!
-  this.once('sensordata', _.bind(this.emit, this, 'ready'));
-
-  return this;
-};
-
 // collect serial data in an internal buffer until we receive an entire packet,
 // and then emit a 'packet' event so that packet can be specifically parsed.
 Robot.prototype._parseSerialData = function (emitter, data) {
@@ -142,17 +108,249 @@ Robot.prototype._parseSerialData = function (emitter, data) {
 };
 
 // handle incoming sensor data and emit events to notify of changes
-Robot.prototype._handleSensorData = function (sensorData) {
-  // if there was previous sensor data, handle pertinent state changes and emit
-  // events as appropriate.
+Robot.prototype._handleSensorData = function (newSensorData) {
+  // if there was previous sensor data, emit data change events
   if (this._sensorData) {
-    // TODO: emit events and update state
+    // the functions that handle emitting events on data changes
+    var emitFunctions = [
+      this._detectBump, // bump
+      this._detectButton, // button
+      this._detectCliff, // cliff
+      this._detectIR, // ir
+      this._detectMode, // mode
+      this._detectVirtualWall, // virtualwall
+      this._detectWall, // wall
+      this._detectWheelDrop // wheeldrop
+    ];
+
+    // call all the functions with our sensor data values and collect results
+    var emittedEvents = _.map(emitFunctions, function (f) {
+      return f.call(this, this._sensorData, newSensorData);
+    }, this);
+
+    // if any of the events returned something truthy, emit the meta event
+    if (_.any(emittedEvents)) { this.emit('change'); }
   }
 
   // update the stored sensor values now that we're done looking at them
-  this._sensorData = sensorData;
+  this._sensorData = newSensorData;
 
   return this;
+};
+
+// run once the serial port reports a connection
+Robot.prototype._init = function () {
+  // null out the sensor data so we can't be flooded with change events on a
+  // reconnect.
+  this._sensorData = null;
+
+  // send the required initial start command to the robot
+  this._sendCommand(commands.Start);
+
+  // enter safe mode by default
+  this.safeMode();
+
+  // start streaming all sensor data. we manually specify the packet ids we need
+  // since streaming with the special bytes (id < 7) returns responses that
+  // require special cases to parse correctly.
+  var packets = _.pluck(sensors.ALL_SENSOR_PACKETS, 'id');
+  this._sendCommand(commands.Stream, packets.length, packets);
+
+  // give audible feedback that we've connected
+  this.sing(songs.START);
+
+  // zero the LED values (so we can be sure about what the LED state is), then
+  // turn the power LED green with 100% brightness.
+  this.setLEDs({
+    play: false,
+    advance: false,
+    power_intensity: 1,
+    power_color: 0
+  });
+
+  // emit an event to alert that we're now ready to receive commands once we've
+  // received the first sensor data. that means that the robot is communicating
+  // with us and ready to go!
+  this.once('sensordata', _.bind(this.emit, this, 'ready'));
+
+  return this;
+};
+
+// emit an event with some data if a value has changed to the specified value.
+//  returns the result of the sensor data comparison.
+Robot.prototype._emitValueChange = function (keyName, value, oldSensorData,
+    newSensorData, eventName, eventData) {
+  return misc.compare(oldSensorData, newSensorData, keyName, function (v) {
+    if (_.isEqual(v, value)) {
+      this.emit(eventName, eventData);
+    }
+  }, this);
+};
+
+// emit events if a wheel drop was detected
+Robot.prototype._detectWheelDrop = function (oldSensorData, newSensorData) {
+  var rightCmp = this._emitValueChange('wheels.right.dropped', true,
+      oldSensorData, newSensorData, 'wheeldrop:right');
+
+  var leftCmp = this._emitValueChange('wheels.left.dropped', true,
+      oldSensorData, newSensorData, 'wheeldrop:left');
+
+  var casterCmp = this._emitValueChange('wheels.caster.dropped', true,
+      oldSensorData, newSensorData, 'wheeldrop:caster');
+
+  // emit an overall event if any of the values changed
+  var data = null;
+  if ((rightCmp.changed && rightCmp.value) ||
+      (leftCmp.changed && leftCmp.value) ||
+      (casterCmp.changed && casterCmp.value)) {
+    data = {
+      right: rightCmp.value,
+      left: leftCmp.value,
+      caster: casterCmp.value
+    };
+    this.emit('wheeldrop', data);
+  }
+
+  return data;
+};
+
+// emit events if a bumper was bumped
+Robot.prototype._detectBump = function (oldSensorData, newSensorData) {
+  var rightCmp = this._emitValueChange('bumpers.right.activated', true,
+      oldSensorData, newSensorData, 'bump:right');
+
+  var leftCmp = this._emitValueChange('bumpers.left.activated', true,
+      oldSensorData, newSensorData, 'bump:left');
+
+  var data = null;
+  if ((rightCmp.changed && rightCmp.value) ||
+      (leftCmp.changed && leftCmp.value)) {
+
+    // emit a virtual event for a 'center' bumper if both bumpers are active
+    var bothBumped = leftCmp.value && rightCmp.value;
+    if (bothBumped) { this.emit('bump:both'); }
+
+    data = {
+      // bumpers mapped to whether they're activated
+      right: rightCmp.value,
+      left: leftCmp.value,
+      both: rightCmp.value && leftCmp.value
+    };
+    this.emit('bump', data);
+  }
+
+  return data;
+};
+
+// emit events if a cliff was detected
+Robot.prototype._detectCliff = function (oldSensorData, newSensorData) {
+  var leftCmp = this._emitValueChange(
+      'cliff_sensors.left.detecting', true,
+      oldSensorData, newSensorData, 'cliff:left',
+      _.pick(newSensorData.cliff_sensors.left, 'signal'));
+
+  var frontLeftCmp = this._emitValueChange(
+      'cliff_sensors.front_left.detecting', true,
+      oldSensorData, newSensorData, 'cliff:front_left',
+      _.pick(newSensorData.cliff_sensors.front_left, 'signal'));
+
+  var frontRightCmp = this._emitValueChange(
+      'cliff_sensors.front_right.detecting', true,
+      oldSensorData, newSensorData, 'cliff:front_right',
+      _.pick(newSensorData.cliff_sensors.front_right, 'signal'));
+
+  var rightCmp = this._emitValueChange(
+      'cliff_sensors.right.detecting', true,
+      oldSensorData, newSensorData, 'cliff:right',
+      _.pick(newSensorData.cliff_sensors.right, 'signal'));
+
+  var data = null;
+  if ((leftCmp.changed && leftCmp.value) ||
+      (frontLeftCmp.changed && frontLeftCmp.value) ||
+      (frontRightCmp.changed && frontRightCmp.value) ||
+      (rightCmp.changed && rightCmp.value)) {
+    data = extend({}, newSensorData.cliff_sensors);
+    this.emit('cliff', data);
+  }
+
+  return data;
+};
+
+// emit events if a wall was detected
+Robot.prototype._detectWall = function (oldSensorData, newSensorData) {
+  var data = _.pick(newSensorData.wall_sensor, 'signal');
+  var cmp = this._emitValueChange('wall_sensor.detecting', true,
+      oldSensorData, newSensorData, 'wall', data);
+
+  // return the comparison event data if the event happened
+  if (cmp.changed && cmp.value) { return data; }
+  return null;
+};
+
+// emit events if a virtual wall was detected
+Robot.prototype._detectVirtualWall = function (oldSensorData, newSensorData) {
+  var cmp = this._emitValueChange('virtual_wall_sensor.detecting', true,
+      oldSensorData, newSensorData, 'virtualwall');
+
+  if (cmp.changed && cmp.value) { return true; }
+  return null;
+};
+
+// emit events if an IR signal was received
+Robot.prototype._detectIR = function (oldSensorData, newSensorData) {
+  var data = { value: newSensorData.ir.received_value };
+  var cmp = this._emitValueChange('ir.receiving', true,
+      oldSensorData, newSensorData, 'ir', data);
+
+  if (cmp.changed && cmp.value) { return data; }
+  return null;
+};
+
+// emit events if a button was pressed
+Robot.prototype._detectButton = function (oldSensorData, newSensorData) {
+  var advanceCmp = this._emitValueChange('buttons.advance.pressed', true,
+      oldSensorData, newSensorData, 'button:advance');
+
+  var playCmp = this._emitValueChange('buttons.play.pressed', true,
+      oldSensorData, newSensorData, 'button:play');
+
+  var data = null;
+  if ((advanceCmp.changed && advanceCmp.value) ||
+      (playCmp.changed && playCmp.value)) {
+    data = {
+      advance: newSensorData.buttons.advance.pressed,
+      play: newSensorData.buttons.play.pressed
+    };
+    this.emit('button', data);
+  }
+
+  return data;
+};
+
+// emit events if the mode changed
+Robot.prototype._detectMode = function (oldSensorData, newSensorData) {
+  var offCmp = this._emitValueChange('state.mode.off', true,
+      oldSensorData, newSensorData, 'mode:off');
+
+  var passiveCmp = this._emitValueChange('state.mode.passive', true,
+      oldSensorData, newSensorData, 'mode:passive');
+
+  var safeCmp = this._emitValueChange('state.mode.safe', true,
+      oldSensorData, newSensorData, 'mode:safe');
+
+  var fullCmp = this._emitValueChange('state.mode.full', true,
+      oldSensorData, newSensorData, 'mode:full');
+
+  var data = null;
+  if ((offCmp.changed && offCmp.value) ||
+      (passiveCmp.changed && passiveCmp.value) ||
+      (safeCmp.changed && safeCmp.value) ||
+      (fullCmp.changed && fullCmp.value)) {
+    data = extend({}, newSensorData.state.mode);
+    this.emit('mode', data);
+  }
+
+  return data;
 };
 
 // send a command packet to the robot over the serial port, with additional

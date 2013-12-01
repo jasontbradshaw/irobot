@@ -1,3 +1,4 @@
+var _ = require('lodash');
 var extend = require('node.extend');
 
 // turn a buffer into an int intelligently depending on its length
@@ -61,4 +62,39 @@ module.exports.byteToBits = function (b) {
     !!((b & 0x40) >> 6),
     !!((b & 0x80) >> 7)
   ];
+};
+
+// given a 'previous' version of an object, the current version of the same
+// object, and a dot-delimited key string, determine if that key's value has
+// changed between objects using a deep-equals comparison. if the value has
+// changed, return it in a 'value' key in the result object. if the values are
+// the same, returns an empty object. if a callback is specified, it is run with
+// the current value if that value differs from the previous one. if context is
+// specified, the callback will be run with it as its 'this' value.
+module.exports.compare = function (prevObj, curObj, keyString, callback, context) {
+  var keyParts = keyString.trim().split('.');
+  var i, length, key;
+
+  // get the previous and current values at our key location
+  var prevVal = prevObj;
+  var curVal = curObj;
+  for (i = 0, length = keyParts.length; key = keyParts[i], i < length; i++) {
+    prevVal = prevVal[key];
+    curVal = curVal[key];
+  }
+
+  // return information about whether the values differed
+  var result = {
+    key: keyString,
+    changed: !_.isEqual(curVal, prevVal),
+    value: curVal
+  };
+
+  // run the callback function if the value changed
+  if (result.changed && _.isFunction(callback)) {
+    callback.call(context || null, result.value);
+  }
+
+
+  return result;
 };
