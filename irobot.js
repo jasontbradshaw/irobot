@@ -7,6 +7,7 @@ var serialport = require('serialport');
 
 var commands = require('./commands');
 var demos = require('./demos');
+var misc = require('./misc');
 var sensors = require('./sensors');
 var songs = require('./songs');
 
@@ -47,6 +48,17 @@ var Robot = function (device, options) {
   // handle incoming sensor data whenever we get it
   this.on('sensordata', this._handleSensorData.bind(this));
 
+  // the current state of the power LEDs. all always start at zero, which is
+  // what the create puts them at when the mode is changed to safe or full.
+  // NOTE: if the create is in passive mode, these values will be wrong, but
+  // that case is unlikely so we ignore it.
+  this._ledState = {
+    play: false,
+    advance: false,
+    power_intensity: 0,
+    power_color: 0
+  };
+
   // where incoming serial data is held until a complete packet is received
   this._buffer = [];
 };
@@ -69,6 +81,15 @@ Robot.prototype._init = function () {
 
   // give feedback that we've connected
   this.sing(songs.START);
+
+  // zero the LED values (so we can be sure about what the LED state is), then
+  // turn the power LED green with 100% brightness.
+  this.setLEDs({
+    play: false,
+    advance: false,
+    power_intensity: 1,
+    power_color: 0
+  });
 
   // emit an event to alert that we're now ready to receive commands once we've
   // received the first sensor data. that means that the robot is communicating
@@ -142,17 +163,25 @@ Robot.prototype._sendCommand = function (command) {
   var packet = _.flatten(Array.prototype.slice.call(arguments, 1));
   packet.unshift(command.opcode);
 
+  var packetBytes = new Buffer(packet);
+
+  console.log(command.name + '[' + command.opcode + ']:', packet.slice(1));
+
   // write the bytes and flush the write to force sending the data immediately
-  this.serial.write(new Buffer(packet));
+  this.serial.write(packetBytes);
   this.serial.flush();
 
   return this;
 };
 
-// return a copy of the most recently received sensor data, or null if none has
-// been received yet.
+// return a copy of the most recently received sensor data
 Robot.getSensorData = function () {
-  return this._sensorData ? extend({}, this._sensorData) : null;
+  return extend({}, this._sensorData);
+};
+
+// return the most recently received battery information
+Robot.prototype.getBatteryInfo = function () {
+  return this.getSensorData().battery;
 };
 
 // make the robot play a song. notes is an array of arrays, where each item is a
@@ -204,12 +233,17 @@ Robot.prototype.passiveMode = function () {
 // put the robot into safe mode
 Robot.prototype.safeMode = function () {
   this._sendCommand(commands.Safe);
+
+  // reset the LEDs so they'll take on the last values that were set
+  this.setLEDs();
+
   return this;
 };
 
 // put the robot into full mode
 Robot.prototype.fullMode = function () {
   this._sendCommand(commands.Full);
+  this.setLEDs();
   return this;
 };
 
@@ -227,12 +261,116 @@ Robot.prototype.dock = function () {
   return this;
 };
 
+// toggle the play or advance LED by name. defaults the 'enable' value to the
+// inverse of the last set value.
+Robot.prototype._toggleLED = function (name, enable) {
+  enable = _.isUndefined(enable) ? !this._ledState[name] : enable;
+
+  // create and set an LED state object with our key and boolean value
+  var state = {};
+  state[name] = !!enable;
+  this.setLEDs(state);
+
+  return this;
+};
+
+// toggle the state of the 'play' LED, or set it to the value given (true for
+// on, false for off).
+Robot.prototype.togglePlayLED = function (enable) {
+  this._toggleLED('play', enable);
+  return this;
+};
+
+// toggle the state of the 'advance' LED, or set it to the given value (true for
+// on, false for off).
+Robot.prototype.toggleAdvanceLED = function (enable) {
+  this._toggleLED('advance', enable);
+  return this;
+};
+
+// set the intensity and color of the power LED. if intensity is not given,
+// defaults to 0. if only an intensity is given, the color is left unchanged.
+// intensity ranges from 0 (off) to 1 (maximum brightness). color ranges from 0
+// (green) to 1 (red) with intermediate values being a blend between these
+// colors (orange, yellow, etc.).
+Robot.prototype.setPowerLED = function (intensity, color) {
+  // default intensity to 0
+  intensity = _.isNumber(intensity) ? intensity : 0;
+
+  this.setLEDs({
+    power_intensity: intensity,
+    power_color: color
+  });
+
+  return this;
+};
+
+// set the state of all LEDs at once. all parameter values behave as they do in
+// their individual methods, with the exception that undefined values are filled
+// in from the last set LED state values.
+//
+// this function, or any of the individual functions, will have no effect if the
+// robot is in passive mode. once the mode is changed from passive to safe or
+// full, the last set LED state will be restored.
+//
+// expects an object like:
+// {
+//   play: true,
+//   advance: false,
+//   power_color: 0.2,
+//   power_intensity: 0.65
+// }
+Robot.prototype.setLEDs = function (leds) {
+  // copy the object we were sent so we can modify its values
+  leds = extend({}, leds);
+
+  // turn the play and advance values into bytes of 0 or 1
+  if (!_.isUndefined(leds.play)) {
+    leds.play = +(!!leds.play);
+  }
+  if (!_.isUndefined(leds.advance)) {
+    leds.advance = +(!!leds.advance);
+  }
+
+  // turn the power intensity and color values into bytes between 0 and 255
+  if (!_.isUndefined(leds.power_intensity)) {
+    leds.power_intensity = Math.round(
+        Math.max(0, Math.min(255, 255 * leds.power_intensity)));
+  }
+  if (!_.isUndefined(leds.power_color)) {
+    leds.power_color = Math.round(
+        Math.max(0, Math.min(255, 255 * leds.power_color)));
+  }
+
+  // fill in missing values from the prior state
+  leds = extend({}, this._ledState, leds);
+
+  // send the command to update the LEDs
+  this._sendCommand(commands.LEDs,
+    // build the play/advance state byte
+    misc.bitsToByte([false, leds.play, false, leds.advance]),
+
+    leds.power_color,
+    leds.power_intensity
+  );
+
+  // store the state for the next time an LED function is called
+  this._ledState = leds;
+
+  return this;
+};
+
 // drive the robot in one of two ways:
 //  - velocity, radius
 //  - { right: velocity, left: velocity }
+// if radius is left unspecified, 'straight' is assumed. if an individual
+// velocity is left unspecified, 0 is assumed.
 Robot.prototype.drive = function (velocity, radius) {
   var maxVelocity = 500; // millimeters per second
   var maxRadius = 2000; // millimeters
+
+  // default the radius to 'straight'
+  radius = radius || 0;
 
   // the command we'll eventually run
   var command = null;
@@ -245,8 +383,8 @@ Robot.prototype.drive = function (velocity, radius) {
     command = commands.Drive;
 
     // constrain values
-    velocity = Math.min(-maxVelocity, Math.max(maxVelocity, velocity));
-    radius = Math.min(-maxRadius, Math.max(maxRadius, radius));
+    velocity = Math.max(-maxVelocity, Math.min(maxVelocity, velocity));
+    radius = Math.max(-maxRadius, Math.min(maxRadius, radius));
 
     // build the bytes for our velocity numbers
     data.writeInt16BE(velocity, 0);
@@ -255,10 +393,10 @@ Robot.prototype.drive = function (velocity, radius) {
     command = commands.DriveDirect;
 
     // use direct drive, where each wheel gets its own independent velocity
-    var velocityLeft = Math.min(-maxVelocity,
-        Math.max(maxVelocity, velocity.left));
-    var velocityRight = Math.min(-maxVelocity,
-        Math.max(maxVelocity, velocity.right));
+    var velocityLeft = Math.max(-maxVelocity,
+        Math.min(maxVelocity, velocity.left || 0));
+    var velocityRight = Math.max(-maxVelocity,
+        Math.min(maxVelocity, velocity.right || 0));
 
     data.writeInt16BE(velocityLeft, 0);
     data.writeInt16BE(velocityRight, 2);
@@ -271,8 +409,8 @@ Robot.prototype.drive = function (velocity, radius) {
 
 // stop the robot from moving/rotating, and stop any current demo
 Robot.prototype.halt = function () {
-  this.demo(demos.Abort);
   this.drive(0, 0);
+  this.demo(demos.Abort);
   return this;
 };
 
