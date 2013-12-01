@@ -8,7 +8,7 @@
     "name": "Jason T. Bradshaw",
     "url": "http://jasontbradshaw.com"
   },
-  "main": "./irobot",
+  "main": "./index",
   "licenses": [
     {
       "type": "MIT",
@@ -18,6 +18,9 @@
   "repository": {
     "type": "git",
     "url": "git://github.com/jasontbradshaw/irobot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jasontbradshaw/irobot/issues"
   },
   "engines": {
     "node": ">=0.10.0"

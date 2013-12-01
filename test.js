@@ -1,6 +1,6 @@
-var Robot = require('./irobot').Robot;
+var irobot = require('./index');
 
-var robot = new Robot('/dev/ttyUSB0');
+var robot = new irobot.Robot('/dev/ttyUSB0');
 
 robot.on('ready', function () {
   console.log('READY');
