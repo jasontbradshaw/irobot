@@ -1,6 +1,6 @@
 {
   "name": "irobot",
-  "description": "An implementation of the iRobot Open Interface version 2 API.",
+  "description": "A human-friendly implementation of the iRobot Open Interface version 2 API.",
   "private": true,
   "version": "0.0.0",
   "homepage": "http://github.com/jasontbradshaw/irobot",
