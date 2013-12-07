@@ -1,9 +1,8 @@
 {
   "name": "irobot",
   "description": "A human-friendly implementation of the iRobot Open Interface version 2 API.",
-  "private": true,
-  "version": "0.0.0",
-  "homepage": "http://github.com/jasontbradshaw/irobot",
+  "version": "0.1.0",
+  "homepage": "https://github.com/jasontbradshaw/irobot",
   "author": {
     "name": "Jason T. Bradshaw",
     "url": "http://jasontbradshaw.com"
@@ -12,7 +11,7 @@
   "licenses": [
     {
       "type": "MIT",
-      "url": "http://github.com/jasontbradshaw/irobot/blob/master/LICENSE"
+      "url": "https://github.com/jasontbradshaw/irobot/blob/master/LICENSE"
     }
   ],
   "repository": {
@@ -34,7 +33,7 @@
     "roomba"
   ],
   "dependencies": {
-    "lodash": "~2.3.0",
+    "lodash": "~2.4.1",
     "node.extend": "~1.0.8",
     "serialport": "~1.2.5"
   }
